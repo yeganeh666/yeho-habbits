@@ -150,9 +150,9 @@ function Goals({ m }: { m: ReturnType<typeof useMonth> }) {
   const mo = m.goals.filter((g) => g.scope === "month");
   return (
     <section className="mt-8">
-      <h2 className="mb-3 text-xl font-extrabold">عادت‌های هفتگی</h2>
+      <h2 className="mb-3 text-xl font-extrabold"> اهداف هفتگی</h2>
       <div className="grid gap-3 sm:grid-cols-2">{WEEK_LABELS.map((l, i) => <Card key={l} title={l} scope="week" slot={i + 1} color="rgb(var(--plum))" list={wk(i + 1)} />)}</div>
-      <h2 className="mb-3 mt-8 text-xl font-extrabold">عادت‌های ماهانه</h2>
+      <h2 className="mb-3 mt-8 text-xl font-extrabold">اهداف  ماهانه</h2>
       <Card title="هدف‌های ماه" scope="month" slot={mo.filter((g) => g.slot === 1).length >= 10 ? 2 : 1} color="rgb(var(--brand))" list={mo} />
     </section>
   );
