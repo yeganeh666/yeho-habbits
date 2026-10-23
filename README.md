@@ -1,1 +1,39 @@
-# yeho-habbits
+# عادت‌ها — ردیاب عادت با همگام‌سازی گوگل شیت (PWA)
+
+Next.js 14 + Supabase + Docker Compose / Vercel
+
+## راه‌اندازی (۴ مرحله)
+
+### ۱. Supabase
+1. پروژه بسازید ← SQL Editor ← محتوای `supabase/schema.sql` را اجرا کنید.
+2. Authentication ← Providers ← Email روشن باشد (برای شروع می‌توانید «Confirm email» را خاموش کنید).
+3. مقادیر `URL`, `anon key`, `service_role key` را از Project Settings ← API بردارید.
+
+### ۲. Google Cloud (برای شیت و تقویم)
+1. پروژه بسازید و این دو API را Enable کنید: **Google Sheets API** و **Google Calendar API**.
+2. OAuth consent screen: نوع External؛ **Publishing status را «In production» بگذارید** (وگرنه رفرش‌توکن بعد از ۷ روز منقضی می‌شود؛ هشدار «unverified» برای استفادهٔ شخصی مشکلی ندارد).
+3. Credentials ← OAuth client ID ← Web application. در Authorized redirect URIs اضافه کنید:
+   - `http://localhost:3000/api/google/callback`
+   - `https://<دامنه‌ی-vercel-شما>/api/google/callback`
+
+### ۳. اجرا با Docker Compose
+```bash
+cp .env.example .env     # مقادیر را پر کنید
+docker compose up -d --build
+# → http://localhost:3000
+```
+
+### ۴. دیپلوی روی Vercel
+Import همین ریپو ← Environment Variables همان ۶ متغیر `.env` (با `APP_URL=https://دامنه‌ی-شما`) ← Deploy.
+
+## بعد از اولین ورود
+تنظیمات ← «اتصال به گوگل» ← لینک شیت و پیشوند تب (مثلاً `حسین`) را ذخیره کنید ← «همگام‌سازی الان».
+عادت‌های موجود در تب ماه جاری به اپ وارد می‌شوند.
+
+## همگام‌سازی چطور کار می‌کند
+- تیک در اپ ← فوراً در دیتابیس ذخیره، حدود ۱ ثانیه بعد در سلول شیت نوشته می‌شود.
+- شیت ← اپ: هر ۱ دقیقه (و هنگام برگشتن به اپ) شیت خوانده و مقایسه می‌شود.
+- تعارض: تغییری که در اپ هنوز به شیت نرسیده، برنده است.
+- تب ماه جدید: اگر وجود نداشت از آخرین تب کپی ساخته می‌شود و «هدف روزانه» (ردیف ۳۴) به‌جای عدد دستی فرمول `COUNTA` می‌گیرد.
+- شیت فقط ۳۰ ستون روز دارد؛ روز ۳۱ فقط در اپ می‌ماند.
+- عادت بایگانی‌شده از شیت حذف نمی‌شود (تاریخچه حفظ می‌شود).

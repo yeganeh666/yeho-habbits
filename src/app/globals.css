@@ -1,0 +1,31 @@
+@import "@fontsource-variable/vazirmatn";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: 243 241 252; --surface: 255 255 255; --ink: 23 20 43; --mute: 112 108 140; --line: 226 223 242;
+  --brand: 91 61 245; --soft: 232 228 253; --mint: 38 188 208; --plum: 170 52 135; --amber: 245 160 40;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: 15 13 28; --surface: 27 24 48; --ink: 240 238 255; --mute: 154 150 184; --line: 48 44 78;
+    --brand: 146 122 255; --soft: 42 37 82; --mint: 77 208 225; --plum: 214 96 180; --amber: 255 190 95;
+    color-scheme: dark;
+  }
+}
+html, body { background: rgb(var(--bg)); color: rgb(var(--ink)); }
+body { font-family: "Vazirmatn Variable", Vazirmatn, system-ui, sans-serif; -webkit-tap-highlight-color: transparent; overscroll-behavior-y: none; }
+button { touch-action: manipulation; }
+:focus-visible { outline: 2px solid rgb(var(--brand)); outline-offset: 2px; border-radius: 8px; }
+input, select { font: inherit; }
+.safe-b { padding-bottom: calc(env(safe-area-inset-bottom) + 6.5rem); }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+
+@keyframes pop { 0% { transform: scale(.82) } 55% { transform: scale(1.14) } 100% { transform: scale(1) } }
+.pop { animation: pop .28s ease-out; }
+@keyframes rise { from { transform: translateY(24px); opacity: 0 } to { transform: none; opacity: 1 } }
+.rise { animation: rise .22s ease-out; }
+@media (prefers-reduced-motion: reduce) { .pop, .rise { animation: none; } * { transition: none !important; } }
