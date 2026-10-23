@@ -25,7 +25,7 @@ export default function Login() {
           <path d="M28 8a20 20 0 0 1 17 9.5" stroke="#4DD0E1" strokeWidth="6" strokeLinecap="round" /><path d="M20 29l6 6 11-12" stroke="#fff" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
       </div>
       <h1 className="text-3xl font-extrabold leading-tight">هر روز، یک تیک جلوتر</h1>
-      <p className="mb-8 mt-2 text-mute">عادت‌هایت را اینجا تیک بزن؛ شیتت خودش به‌روز می‌شود.</p>
+      <p className="mb-8 mt-2 text-mute">عادت‌هایت را اینجا تیک بزن؛ پیشرفتت در پایگاه داده امن ذخیره می‌شود.</p>
       <form onSubmit={submit}>
         <Field label="ایمیل"><input className={inputCls} dir="ltr" type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
         <Field label="رمز عبور"><input className={inputCls} dir="ltr" type="password" required minLength={6} autoComplete={mode === "in" ? "current-password" : "new-password"} value={pw} onChange={(e) => setPw(e.target.value)} /></Field>

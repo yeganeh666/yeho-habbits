@@ -3,7 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import { addDays, fa, fromISO, monthLength, MONTHS, shiftMonth, toISO, todayISO } from "@/lib/jalali";
 import { useMonth } from "@/lib/data";
 import { sb } from "@/lib/supabase-browser";
-import { Bar, Donut, pctText } from "@/components/ui";
+import Link from "next/link";
+import { Bar, CalendarBadge, Donut, pctText } from "@/components/ui";
 
 export default function Stats() {
   const now = fromISO(todayISO());
@@ -44,8 +45,20 @@ export default function Stats() {
   const mo = m.goals.filter((g) => g.scope === "month");
 
   return (
-    <main className="mx-auto max-w-xl">
-      <h1 className="mb-5 text-2xl font-extrabold">آمار {MONTHS[now.jm - 1]} {fa(now.jy)}</h1>
+    <main className="mx-auto max-w-xl pb-10">
+      <header className="mb-5 flex items-center justify-between">
+        <h1 className="text-2xl font-extrabold">آمار {MONTHS[now.jm - 1]} {fa(now.jy)}</h1>
+        <div className="flex items-center gap-2">
+          <CalendarBadge />
+          <Link
+            href="/settings"
+            aria-label="تنظیمات"
+            className="grid h-8 w-8 place-items-center rounded-full bg-surface shadow-card text-mute hover:text-ink active:scale-95 transition-transform text-sm"
+          >
+            ⚙️
+          </Link>
+        </div>
+      </header>
 
       <section className="grid grid-cols-2 gap-3">
         <div className="rounded-hero bg-brand p-5 text-white shadow-card">

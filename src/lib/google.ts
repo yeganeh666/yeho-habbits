@@ -2,12 +2,11 @@ import { OAuth2Client } from "google-auth-library";
 import { adminClient } from "./supabase-server";
 
 export const SCOPES = [
-  "https://www.googleapis.com/auth/spreadsheets",
   "https://www.googleapis.com/auth/calendar.events",
   "openid", "email",
 ];
 export const oauthClient = () =>
-  new OAuth2Client(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET, `${process.env.APP_URL}/api/google/callback`);
+  new OAuth2Client(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET, `${process.env.APP_URL || "http://localhost:3000"}/api/google/callback`);
 
 export async function authedClient(userId: string) {
   const { data } = await adminClient().from("google_tokens").select("refresh_token").eq("user_id", userId).maybeSingle();

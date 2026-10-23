@@ -3,8 +3,10 @@ import { adminClient } from "@/lib/supabase-server";
 import { oauthClient } from "@/lib/google";
 
 export const dynamic = "force-dynamic";
+
 export async function GET(req: NextRequest) {
-  const back = (q: string) => NextResponse.redirect(new URL(`/settings?${q}`, process.env.APP_URL));
+  const origin = req.nextUrl.origin || process.env.APP_URL || "http://localhost:3000";
+  const back = (q: string) => NextResponse.redirect(new URL(`/settings?${q}`, origin));
   const code = req.nextUrl.searchParams.get("code");
   const state = req.nextUrl.searchParams.get("state");
   const [cookieState, userId] = (req.cookies.get("g_state")?.value ?? "").split(".");

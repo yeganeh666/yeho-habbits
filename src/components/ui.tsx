@@ -3,7 +3,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { fa } from "@/lib/jalali";
-import { useSyncState } from "@/lib/data";
 
 /* ---------- حلقهٔ پیشرفت: هر عادت یک قطعه ---------- */
 export function SegRing({ segments, size = 190, stroke = 16, children, onColor = "rgb(var(--mint))", offColor = "rgba(255,255,255,.18)" }:
@@ -91,42 +90,69 @@ export function Toaster() {
   return <div role="status" className="rise fixed inset-x-4 top-4 z-[60] mx-auto max-w-sm rounded-2xl bg-ink px-4 py-3 text-center text-sm font-semibold text-bg shadow-pop">{msg}</div>;
 }
 
-/* ---------- نشانگر همگام‌سازی شیت ---------- */
-export function SyncBadge() {
-  const s = useSyncState();
-  const map = {
-    off: ["rgb(var(--mute))", "شیت وصل نیست"], idle: ["rgb(var(--mute))", "—"], syncing: ["rgb(var(--amber))", "در حال همگام‌سازی"],
-    ok: ["rgb(var(--mint))", "با شیت همگام است"], error: ["#E5484D", s.message ? "خطا در همگام‌سازی" : "خطا"],
-  } as const;
-  const [c, t] = map[s.phase];
+/* ---------- نشانگر وضعیت اتصال تقویم گوگل ---------- */
+export function CalendarBadge() {
+  const [connected, setConnected] = useState<boolean>(false);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("habitly_mock_user_settings");
+      if (raw) {
+        const item = JSON.parse(raw);
+        const st = Array.isArray(item) ? item[0] : item;
+        if (st?.script_url || st?.google_email) {
+          setConnected(true);
+          return;
+        }
+      }
+    } catch {}
+    setConnected(false);
+  }, []);
+
   return (
-    <Link href="/settings" title={s.message} className="flex items-center gap-1.5 rounded-full bg-surface px-3 py-1.5 text-xs font-semibold text-mute shadow-card">
-      <span className={`h-2 w-2 rounded-full ${s.phase === "syncing" ? "animate-pulse" : ""}`} style={{ background: c }} />{t}
+    <Link
+      href="/settings"
+      title={connected ? "تقویم گوگل متصل است" : "اتصال به تقویم گوگل"}
+      className="flex items-center gap-1.5 rounded-full bg-surface px-3 py-1.5 text-xs font-semibold text-mute shadow-card hover:text-ink transition-colors"
+    >
+      <span className={`h-2 w-2 rounded-full ${connected ? "bg-mint" : "bg-mute/40"}`} />
+      <span>{connected ? "تقویم متصل" : "اتصال تقویم"}</span>
     </Link>
   );
 }
 
-/* ---------- نوار پایین ---------- */
-const I = (d: string) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>;
+export const SyncBadge = CalendarBadge;
+
+/* ---------- نوار پایین (موبایل‌فرست) ---------- */
+const I = (d: string) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>;
 const TABS = [
   { href: "/", label: "امروز", icon: I("M12 3v2M12 19v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M3 12h2M19 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4M12 8a4 4 0 100 8 4 4 0 000-8z") },
   { href: "/habits", label: "عادت‌ها", icon: I("M4 5h16v14H4zM4 10h16M9 5v14M15 5v14") },
+  { href: "/pomodoro", label: "پومودورو", icon: I("M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0zM10 2h4") },
   { href: "/todos", label: "کارها", icon: I("M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2") },
   { href: "/stats", label: "آمار", icon: I("M5 20V10M12 20V4M19 20v-7") },
-  { href: "/settings", label: "تنظیمات", icon: I("M12 15a3 3 0 100-6 3 3 0 000 6zM19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z") },
 ];
+
 export function BottomNav() {
   const path = usePathname();
   return (
-    <nav aria-label="منوی اصلی" className="fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-[calc(env(safe-area-inset-bottom)+12px)]">
-      <ul className="flex items-center gap-1 rounded-full bg-surface p-1.5 shadow-pop ring-1 ring-line">
+    <nav aria-label="منوی اصلی" className="fixed inset-x-0 bottom-0 z-40 flex justify-center px-3 pb-[calc(env(safe-area-inset-bottom)+10px)] pointer-events-none">
+      <ul className="pointer-events-auto flex items-center justify-between w-full max-w-md rounded-3xl bg-surface/95 backdrop-blur-md p-1.5 shadow-pop ring-1 ring-line/80">
         {TABS.map((t) => {
           const on = t.href === "/" ? path === "/" : path.startsWith(t.href);
           return (
-            <li key={t.href}>
-              <Link href={t.href} aria-current={on ? "page" : undefined}
-                className={`flex h-12 items-center justify-center gap-2 rounded-full transition-all ${on ? "bg-brand px-4 text-white" : "w-12 text-mute"}`}>
-                {t.icon}{on && <span className="text-sm font-bold">{t.label}</span>}
+            <li key={t.href} className="flex-1 text-center">
+              <Link
+                href={t.href}
+                aria-current={on ? "page" : undefined}
+                className={`flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-2xl transition-all active:scale-90 ${
+                  on
+                    ? "bg-brand text-white font-extrabold shadow-sm scale-102"
+                    : "text-mute hover:text-ink font-semibold"
+                }`}
+              >
+                {t.icon}
+                <span className="text-[10px] leading-tight select-none">{t.label}</span>
               </Link>
             </li>
           );

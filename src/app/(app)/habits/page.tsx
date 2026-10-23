@@ -1,8 +1,9 @@
 "use client";
 import { useState } from "react";
+import Link from "next/link";
 import { fa, fromISO, monthLength, MONTHS, shiftMonth, toISO, todayISO, WEEKDAYS_SHORT, weekdayIndex, WEEK_LABELS } from "@/lib/jalali";
 import { useMonth } from "@/lib/data";
-import { Bar, Check, pctText, SyncBadge } from "@/components/ui";
+import { Bar, Check, pctText, CalendarBadge } from "@/components/ui";
 import { HabitSheet } from "@/components/habit-sheet";
 import type { Habit } from "@/lib/types";
 
@@ -31,7 +32,16 @@ export default function HabitsMonth() {
           <h1 className="min-w-36 text-center text-xl font-extrabold">{MONTHS[ym.jm - 1]} {fa(ym.jy)}</h1>
           <button aria-label="ماه قبل" className="grid h-10 w-10 place-items-center rounded-full bg-surface shadow-card" onClick={() => setYm(shiftMonth(ym.jy, ym.jm, -1))}>›</button>
         </div>
-        <SyncBadge />
+        <div className="flex items-center gap-2">
+          <CalendarBadge />
+          <Link
+            href="/settings"
+            aria-label="تنظیمات"
+            className="grid h-8 w-8 place-items-center rounded-full bg-surface shadow-card text-mute hover:text-ink active:scale-95 transition-transform text-sm"
+          >
+            ⚙️
+          </Link>
+        </div>
       </header>
 
       <div className="mb-4 flex items-center gap-4 rounded-row bg-surface p-4 shadow-card">
@@ -99,7 +109,6 @@ export default function HabitsMonth() {
         </div>
         {!m.loading && habits.length === 0 && <p className="p-6 text-center text-mute">هنوز عادتی نداری. با دکمهٔ پایین اولی را بساز.</p>}
       </section>
-      {len === 31 && <p className="mt-2 text-xs text-mute">این ماه ۳۱ روز دارد؛ شیت فقط ۳۰ ستون روز دارد، پس تیک روز ۳۱ فقط در اپ ذخیره می‌شود.</p>}
 
       <button onClick={() => { setEdit(null); setOpen(true); }} className="mt-4 w-full rounded-row border-2 border-dashed border-line py-4 font-bold text-brand">+ عادت جدید</button>
 

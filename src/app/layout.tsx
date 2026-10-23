@@ -4,7 +4,7 @@ import { PwaRegister } from "@/components/pwa";
 
 export const metadata: Metadata = {
   title: "عادت‌ها",
-  description: "ردیاب عادت و کارهای روزانه با همگام‌سازی گوگل شیت",
+  description: "ردیاب عادت و کارهای روزانه با اتصال به تقویم گوگل و پایگاه داده",
   manifest: "/manifest.webmanifest",
   appleWebApp: { capable: true, title: "عادت‌ها", statusBarStyle: "black-translucent" },
   icons: { icon: "/icons/icon-192.png", apple: "/icons/apple-touch-icon.png" },

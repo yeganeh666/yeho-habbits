@@ -3,7 +3,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { addDays, fa, fromISO, MONTHS, prettyDate, todayISO, WEEKDAYS_SHORT, weekOfDay, weekStartISO } from "@/lib/jalali";
 import { useMonth, useTodos } from "@/lib/data";
-import { Bar, Check, pctText, SegRing, SyncBadge } from "@/components/ui";
+import { Bar, Check, pctText, SegRing, CalendarBadge } from "@/components/ui";
 
 const greet = () => { const h = +new Intl.DateTimeFormat("en-GB", { hour: "2-digit", hour12: false, timeZone: "Asia/Tehran" }).format(new Date()); return h < 5 ? "شب بخیر" : h < 12 ? "صبح بخیر" : h < 17 ? "ظهر بخیر" : h < 20 ? "عصر بخیر" : "شب بخیر"; };
 
@@ -34,7 +34,16 @@ export default function Today() {
           <p className="text-sm font-semibold text-mute">{greet()}</p>
           <h1 className="text-2xl font-extrabold">{day === today ? "امروز" : prettyDate(day).split(" ")[0]}، {fa(j.jd)} {MONTHS[j.jm - 1]}</h1>
         </div>
-        <SyncBadge />
+        <div className="flex items-center gap-2">
+          <CalendarBadge />
+          <Link
+            href="/settings"
+            aria-label="تنظیمات"
+            className="grid h-8 w-8 place-items-center rounded-full bg-surface shadow-card text-mute hover:text-ink active:scale-95 transition-transform text-sm"
+          >
+            ⚙️
+          </Link>
+        </div>
       </header>
 
       {/* قهرمان: حلقهٔ قطعه‌قطعه — هر عادت یک قطعه */}
@@ -102,7 +111,15 @@ export default function Today() {
               <li key={x.id} className="flex items-center gap-3 rounded-row bg-surface p-3 shadow-card">
                 <Check on={x.done} size={28} color="rgb(var(--mint))" label={x.title} onClick={() => t.toggle(x)} />
                 <span className={`flex-1 truncate ${x.done ? "text-mute line-through" : "font-semibold"}`}>{x.title}</span>
-                {x.remind_time && <span className="text-xs font-semibold text-mute">{fa(x.remind_time.slice(0, 5))}</span>}
+                {x.remind_time && (
+                  <span className="flex items-center gap-1 text-xs font-semibold text-mute">
+                    <span>🔔</span>
+                    {x.remind_date && x.remind_date !== x.day && (
+                      <span className="text-[11px] opacity-80">{fa(fromISO(x.remind_date).jd)} {MONTHS[fromISO(x.remind_date).jm - 1]} ·</span>
+                    )}
+                    <span>{fa(x.remind_time.slice(0, 5))}</span>
+                  </span>
+                )}
               </li>
             ))}
             {t.todos.length > 4 && <li className="text-center text-sm text-mute">و {fa(t.todos.length - 4)} کار دیگر · {fa(todoDone)} انجام شده</li>}

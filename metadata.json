@@ -1,0 +1,8 @@
+{
+  "name": "عادت‌ها (Habitly FA)",
+  "description": "ردیاب عادت و کارهای روزانه با گاه‌شمار جلالی، آمار پیشرفت و اتصال به تقویم گوگل",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
