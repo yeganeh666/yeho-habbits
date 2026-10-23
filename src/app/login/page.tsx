@@ -94,6 +94,11 @@ export default function Login() {
         const { data, error } = await db.auth.signUp({
           email: email.trim(),
           password: pw,
+          options: {
+            emailRedirectTo:
+              process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ??
+              `${window.location.origin}/auth/callback`,
+          },
         });
 
         if (error) {
