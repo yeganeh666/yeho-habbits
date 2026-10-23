@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import { btnGhost, btnPrimary, Field, inputCls, Sheet } from "./ui";
-import { toast } from "@/lib/data";
+import { getLocalScriptUrl, toast } from "@/lib/data";
+import { sb } from "@/lib/supabase-browser";
 import type { Habit } from "@/lib/types";
 
 export const COLORS = ["#5B3DF5", "#26BCD0", "#AA3487", "#F5A028", "#2FA66A", "#E5484D"];
@@ -19,8 +20,28 @@ export function HabitSheet({ open, onClose, habit, defaultTarget, onSave, onArch
     if (!name.trim()) return;
     setBusy(true); await onSave({ name: name.trim(), target, color });
     if (habit && time !== (habit.reminder_time?.slice(0, 5) ?? "")) {
-      const r = await fetch("/api/calendar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "habit", id: habit.id, time: time || null }) });
-      if (!r.ok) toast("یادآور در تقویم ساخته نشد؛ اتصال گوگل را در تنظیمات بررسی کنید");
+      const scriptUrl = getLocalScriptUrl();
+      const r = await fetch("/api/calendar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "habit",
+          id: habit.id,
+          title: name.trim(),
+          eventId: habit.reminder_event_id,
+          time: time || null,
+          scriptUrl,
+        }),
+      });
+      if (!r.ok) {
+        toast("یادآور در تقویم ساخته نشد؛ اتصال تقویم را در تنظیمات بررسی کنید");
+      } else {
+        const j = await r.json().catch(() => ({}));
+        await sb().from("habits").update({
+          reminder_time: time || null,
+          reminder_event_id: time ? (j.eventId || habit.reminder_event_id) : null,
+        }).eq("id", habit.id);
+      }
     }
     setBusy(false); onClose();
   }

@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { sb } from "@/lib/supabase-browser";
 import { btnGhost, btnPrimary, CalendarBadge, Field, inputCls } from "@/components/ui";
-import { toast } from "@/lib/data";
+import { getLocalScriptUrl, setLocalScriptUrl, toast } from "@/lib/data";
 import { GOOGLE_APPS_SCRIPT_SOURCE } from "@/lib/apps-script";
 import type { Settings } from "@/lib/types";
 
@@ -23,9 +23,12 @@ export default function SettingsPage() {
       const { data: u } = await sb().auth.getUser();
       setEmail(u.user?.email ?? "");
       const { data } = await sb().from("user_settings").select("*").maybeSingle();
+      const localScript = getLocalScriptUrl();
       if (data) {
         setSt(data as Settings);
-        setScriptUrl(data.script_url ?? "");
+        setScriptUrl(data.script_url || localScript || "");
+      } else if (localScript) {
+        setScriptUrl(localScript);
       }
       const g = new URLSearchParams(location.search).get("google");
       if (g === "ok") toast("حساب تقویم گوگل با موفقیت متصل شد");
@@ -37,11 +40,13 @@ export default function SettingsPage() {
 
   async function save() {
     setBusy(true);
+    const clean = scriptUrl.trim();
+    setLocalScriptUrl(clean);
     const { data: u } = await sb().auth.getUser();
     const payload = {
-      user_id: u.user!.id,
-      script_url: scriptUrl.trim() || null,
-      calendar_connected: Boolean(scriptUrl.trim() || st?.google_email),
+      user_id: u?.user?.id || "mock-user-id",
+      script_url: clean || null,
+      calendar_connected: Boolean(clean || st?.google_email),
     };
     const { error } = await sb().from("user_settings").upsert(payload);
     setBusy(false);

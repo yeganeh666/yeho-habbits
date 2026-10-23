@@ -30,6 +30,7 @@ export default function Todos() {
   // وضعیت باز بودن تقویم ماهانه
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [calendarTarget, setCalendarTarget] = useState<"quick_add" | "reminder_modal">("reminder_modal");
+  const [directCalendarUrl, setDirectCalendarUrl] = useState<string | null>(null);
 
   const byDay = useMemo(() => {
     const m: Record<string, Todo[]> = {};
@@ -66,6 +67,7 @@ export default function Todos() {
 
   function openReminderModal(todo: Todo) {
     setRem(todo);
+    setDirectCalendarUrl(null);
     setRemTime(todo.remind_time?.slice(0, 5) ?? "09:00");
     setRemDate(todo.remind_date || todo.day || day);
     setRemType(todo.event_type || "reminder");
@@ -447,8 +449,14 @@ export default function Todos() {
               className={`${btnPrimary} flex-1 py-3.5`}
               disabled={!remTime || !remDate}
               onClick={async () => {
-                if (rem) await t.setReminder(rem, remTime, remDate, remType, remDuration);
-                setRem(null);
+                if (rem) {
+                  const res = await t.setReminder(rem, remTime, remDate, remType, remDuration);
+                  if (res?.calendarUrl && res?.notConnected) {
+                    setDirectCalendarUrl(res.calendarUrl);
+                  } else {
+                    setRem(null);
+                  }
+                }
               }}
             >
               {remType === "meeting" ? "ثبت جلسه در تقویم گوگل" : "ثبت یادآور در تقویم گوگل"}
@@ -465,6 +473,40 @@ export default function Todos() {
               </button>
             )}
           </div>
+
+          {directCalendarUrl && (
+            <div className="mt-3 rounded-2xl bg-mint/10 border border-mint/30 p-4 text-center space-y-2.5">
+              <p className="text-sm font-bold text-mint">
+                ✓ با موفقیت ذخیره شد!
+              </p>
+              <p className="text-xs text-mute leading-5">
+                برای ثبت مستقیم در تقویم گوگل گوشی یا مرورگر خود، روی دکمهٔ زیر بزنید:
+              </p>
+              <a
+                href={directCalendarUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => {
+                  setDirectCalendarUrl(null);
+                  setRem(null);
+                }}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand py-3 text-sm font-extrabold text-white shadow-card active:scale-95 transition-transform"
+              >
+                <span>📅</span>
+                <span>باز کردن مستقیم در تقویم گوگل</span>
+              </a>
+              <button
+                type="button"
+                className="text-xs text-mute underline hover:text-ink block mx-auto pt-1"
+                onClick={() => {
+                  setDirectCalendarUrl(null);
+                  setRem(null);
+                }}
+              >
+                بستن پنجره
+              </button>
+            </div>
+          )}
         </div>
       </Sheet>
 

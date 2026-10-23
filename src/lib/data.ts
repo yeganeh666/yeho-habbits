@@ -8,17 +8,37 @@ export function toast(msg: string) {
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("toast", { detail: msg }));
 }
 
-function getLocalScriptUrl(): string {
+export function getLocalScriptUrl(): string {
   if (typeof window === "undefined") return "";
   try {
+    const direct = localStorage.getItem("habitly_calendar_script_url") || localStorage.getItem("calendar_script_url");
+    if (direct && direct.trim()) return direct.trim();
     const raw = localStorage.getItem("habitly_mock_user_settings");
     if (raw) {
       const parsed = JSON.parse(raw);
       const first = Array.isArray(parsed) ? parsed[0] : parsed;
-      return first?.script_url || "";
+      if (first?.script_url && typeof first.script_url === "string") {
+        return first.script_url.trim();
+      }
     }
   } catch {}
   return "";
+}
+
+export function setLocalScriptUrl(url: string) {
+  if (typeof window === "undefined") return;
+  try {
+    const clean = (url || "").trim();
+    if (clean) {
+      localStorage.setItem("habitly_calendar_script_url", clean);
+      localStorage.setItem("calendar_script_url", clean);
+      document.cookie = `calendar_script_url=${encodeURIComponent(clean)}; path=/; max-age=31536000; SameSite=Lax`;
+    } else {
+      localStorage.removeItem("habitly_calendar_script_url");
+      localStorage.removeItem("calendar_script_url");
+      document.cookie = "calendar_script_url=; path=/; max-age=0; SameSite=Lax";
+    }
+  } catch {}
 }
 
 /* ---------- داده‌های یک ماه شمسی در Supabase ---------- */
@@ -171,7 +191,9 @@ export function useTodos(start: string, end: string) {
     time: string | null,
     date?: string | null,
     type?: "reminder" | "meeting",
-    durationMinutes?: number
+    durationMinutes?: number,
+    title?: string,
+    eventId?: string | null
   ) {
     const scriptUrl = getLocalScriptUrl();
     const r = await fetch("/api/calendar", {
@@ -180,6 +202,8 @@ export function useTodos(start: string, end: string) {
       body: JSON.stringify({
         kind,
         id,
+        title,
+        eventId,
         time,
         date,
         type,
@@ -188,17 +212,27 @@ export function useTodos(start: string, end: string) {
       }),
     });
 
+    const j = await r.json().catch(() => ({}));
     if (!r.ok) {
-      const j = await r.json().catch(() => ({}));
       toast(
         j.error === "not_connected"
           ? j.message || "اول در تنظیمات تقویم گوگل را متصل کنید"
           : j.error || "خطا در برقراری ارتباط با تقویم گوگل"
       );
-      return false;
+      return null;
     }
-    toast(time ? (type === "meeting" ? "جلسه در تقویم گوگل ثبت شد" : "یادآور در تقویم گوگل ثبت شد") : "رویداد از تقویم حذف شد");
-    return true;
+
+    if (!time) {
+      toast("رویداد از تقویم حذف شد");
+    } else if (j.notConnected) {
+      toast(type === "meeting" ? "جلسه ثبت شد (آماده برای تقویم گوگل)" : "یادآور ثبت شد (آماده برای تقویم گوگل)");
+      if (j.calendarUrl && typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("calendar_link_ready", { detail: j }));
+      }
+    } else {
+      toast(type === "meeting" ? "جلسه در تقویم گوگل ثبت شد ✓" : "یادآور در تقویم گوگل ثبت شد ✓");
+    }
+    return j;
   }
 
   async function add(
@@ -225,7 +259,10 @@ export function useTodos(start: string, end: string) {
 
     if (error || !data) return toast("کار اضافه نشد");
     if (time) {
-      await calendar("todo", data.id, time, targetDate, type, durationMinutes);
+      const res = await calendar("todo", data.id, time, targetDate, type, durationMinutes, title);
+      if (res && res.eventId) {
+        await sb().from("todos").update({ event_id: res.eventId }).eq("id", data.id);
+      }
     }
     await load();
   }
@@ -237,7 +274,7 @@ export function useTodos(start: string, end: string) {
 
   async function remove(t: Todo) {
     setTodos((p) => p.filter((x) => x.id !== t.id));
-    if (t.event_id) await calendar("todo", t.id, null);
+    if (t.event_id) await calendar("todo", t.id, null, null, undefined, undefined, t.title, t.event_id);
     await sb().from("todos").delete().eq("id", t.id);
   }
 
@@ -249,9 +286,32 @@ export function useTodos(start: string, end: string) {
     durationMinutes = 30
   ) {
     const targetDate = date || t.remind_date || t.day;
-    if (await calendar("todo", t.id, time, time ? targetDate : null, type, durationMinutes)) {
+    if (time) {
+      const res = await calendar("todo", t.id, time, targetDate, type, durationMinutes, t.title, t.event_id);
+      if (res && res.ok) {
+        await sb().from("todos").update({
+          remind_time: time,
+          remind_date: res.date || targetDate,
+          event_type: type,
+          duration_minutes: durationMinutes,
+          event_id: res.eventId || t.event_id,
+        }).eq("id", t.id);
+        await load();
+        return res;
+      }
+    } else {
+      await calendar("todo", t.id, null, null, undefined, undefined, t.title, t.event_id);
+      await sb().from("todos").update({
+        remind_time: null,
+        remind_date: null,
+        event_type: null,
+        duration_minutes: null,
+        event_id: null,
+      }).eq("id", t.id);
       await load();
+      return { ok: true };
     }
+    return null;
   }
 
   return { todos, loading, add, toggle, remove, setReminder, reload: load, calendar };
