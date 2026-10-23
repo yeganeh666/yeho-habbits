@@ -1,260 +1,118 @@
 import { createBrowserClient } from "@supabase/ssr";
+import { getClientSupabaseCredentials } from "./supabase-config";
 
-function isConfigured(url?: string, key?: string): boolean {
-  if (!url || !key) return false;
-  if (!url.startsWith("http")) return false;
-  if (url.includes("xxxx") || url.includes("placeholder") || url.includes("example") || url.includes("your-")) return false;
-  if (key === "eyJ..." || key.includes("...") || key.length < 20) return false;
-  return true;
-}
+let client: ReturnType<typeof createBrowserClient> | null = null;
+let lastUrl = "";
+let lastKey = "";
 
-// Default initial sample data if none exists in localStorage
-const DEFAULT_HABITS = [
-  { id: "h1", name: "مطالعه (۲۰ دقیقه)", monthly_target: 25, color: "#5B3DF5", sort: 0, archived: false, created_at: new Date().toISOString() },
-  { id: "h2", name: "ورزش روزانه", monthly_target: 20, color: "#26BCD0", sort: 1, archived: false, created_at: new Date().toISOString() },
-  { id: "h3", name: "نوشیدن ۸ لیوان آب", monthly_target: 30, color: "#F5A028", sort: 2, archived: false, created_at: new Date().toISOString() },
-];
+export function sb(): ReturnType<typeof createBrowserClient> {
+  const { url, anonKey, isConfigured } = getClientSupabaseCredentials();
 
-function getStore(table: string): any[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(`habitly_mock_${table}`);
-    if (raw) return JSON.parse(raw);
-    if (table === "habits") {
-      localStorage.setItem(`habitly_mock_habits`, JSON.stringify(DEFAULT_HABITS));
-      return [...DEFAULT_HABITS];
-    }
-    return [];
-  } catch {
-    return [];
-  }
-}
-
-function setStore(table: string, data: any[]) {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(`habitly_mock_${table}`, JSON.stringify(data));
-  } catch {}
-}
-
-class MockQueryBuilder {
-  private table: string;
-  private filters: ((item: any) => boolean)[] = [];
-  private orderField?: string;
-  private orderAsc: boolean = true;
-  private isSingle: boolean = false;
-  private isMaybeSingle: boolean = false;
-  private mutationResult: any = null;
-
-  constructor(table: string) {
-    this.table = table;
+  if (isConfigured && (client === null || lastUrl !== url || lastKey !== anonKey)) {
+    client = createBrowserClient(url, anonKey);
+    lastUrl = url;
+    lastKey = anonKey;
+    return client;
   }
 
-  select(_cols?: string) {
-    return this;
+  if (client) {
+    return client;
   }
 
-  order(field: string, opts?: { ascending?: boolean; nullsFirst?: boolean }) {
-    this.orderField = field;
-    this.orderAsc = opts?.ascending !== false;
-    return this;
-  }
-
-  eq(field: string, val: any) {
-    this.filters.push((item) => item[field] === val);
-    return this;
-  }
-
-  gte(field: string, val: any) {
-    this.filters.push((item) => (item[field] ?? "") >= val);
-    return this;
-  }
-
-  lte(field: string, val: any) {
-    this.filters.push((item) => (item[field] ?? "") <= val);
-    return this;
-  }
-
-  in(field: string, vals: any[]) {
-    this.filters.push((item) => vals.includes(item[field]));
-    return this;
-  }
-
-  single() {
-    this.isSingle = true;
-    return this;
-  }
-
-  maybeSingle() {
-    this.isMaybeSingle = true;
-    return this;
-  }
-
-  insert(values: any | any[]) {
-    const items = Array.isArray(values) ? values : [values];
-    const store = getStore(this.table);
-    const added: any[] = [];
-    for (const v of items) {
-      const item = {
-        id: v.id || `mock_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        created_at: v.created_at || new Date().toISOString(),
-        ...v,
-      };
-      store.push(item);
-      added.push(item);
-    }
-    setStore(this.table, store);
-    this.mutationResult = Array.isArray(values) ? added : added[0];
-    return this;
-  }
-
-  update(patch: any) {
-    const store = getStore(this.table);
-    let updatedCount = 0;
-    const newStore = store.map((item) => {
-      const match = this.filters.every((fn) => fn(item));
-      if (match) {
-        updatedCount++;
-        return { ...item, ...patch };
-      }
-      return item;
-    });
-    setStore(this.table, newStore);
-    this.mutationResult = { count: updatedCount };
-    return this;
-  }
-
-  upsert(values: any | any[], _opts?: any) {
-    const items = Array.isArray(values) ? values : [values];
-    const store = getStore(this.table);
-    const added: any[] = [];
-
-    for (const v of items) {
-      let idx = -1;
-      if (this.table === "habit_logs") {
-        idx = store.findIndex((x) => x.habit_id === v.habit_id && x.day === v.day);
-      } else if (this.table === "habit_targets") {
-        idx = store.findIndex((x) => x.habit_id === v.habit_id && x.jy === v.jy && x.jm === v.jm);
-      } else if (this.table === "user_settings") {
-        idx = store.findIndex((x) => x.user_id === v.user_id);
-      } else if (v.id) {
-        idx = store.findIndex((x) => x.id === v.id);
-      }
-
-      const record = {
-        id: v.id || `mock_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        created_at: v.created_at || new Date().toISOString(),
-        ...v,
-      };
-
-      if (idx >= 0) {
-        store[idx] = { ...store[idx], ...record };
-        added.push(store[idx]);
-      } else {
-        store.push(record);
-        added.push(record);
-      }
-    }
-    setStore(this.table, store);
-    this.mutationResult = Array.isArray(values) ? added : added[0];
-    return this;
-  }
-
-  delete() {
-    const store = getStore(this.table);
-    const remaining = store.filter((item) => !this.filters.every((fn) => fn(item)));
-    setStore(this.table, remaining);
-    this.mutationResult = { count: store.length - remaining.length };
-    return this;
-  }
-
-  private execute() {
-    if (this.mutationResult !== null) {
-      return { data: this.mutationResult, error: null };
-    }
-    let list = getStore(this.table);
-    for (const fn of this.filters) {
-      list = list.filter(fn);
-    }
-    if (this.orderField) {
-      const field = this.orderField;
-      const asc = this.orderAsc;
-      list = [...list].sort((a, b) => {
-        const valA = a[field] ?? "";
-        const valB = b[field] ?? "";
-        return asc ? (valA > valB ? 1 : valA < valB ? -1 : 0) : (valA < valB ? 1 : valA > valB ? -1 : 0);
-      });
-    }
-
-    if (this.isSingle) {
-      return { data: list[0] ?? null, error: list.length ? null : { message: "Not found" } };
-    }
-    if (this.isMaybeSingle) {
-      return { data: list[0] ?? null, error: null };
-    }
-    return { data: list, error: null };
-  }
-
-  then(onFulfilled: (res: any) => any, onRejected?: (err: any) => any) {
-    try {
-      const res = this.execute();
-      return Promise.resolve(onFulfilled(res));
-    } catch (err) {
-      if (onRejected) return Promise.resolve(onRejected(err));
-      throw err;
-    }
-  }
-}
-
-function createMockBrowserClient(): any {
+  // Fallback client for unconfigured state — no mock data!
+  const unconfiguredError = { message: "پایگاه داده Supabase هنوز تنظیم نشده است. لطفاً ابتدا به حساب Supabase خود متصل شوید." };
   return {
     auth: {
-      getUser: async () => {
-        const userEmail = typeof window !== "undefined" ? localStorage.getItem("habitly_mock_user_email") : null;
-        return {
-          data: {
-            user: {
-              id: "mock-user-id",
-              email: userEmail || "کاربر محلی (آفلاین)",
-            },
-          },
-          error: null,
-        };
-      },
-      signInWithPassword: async ({ email }: { email: string }) => {
-        if (typeof window !== "undefined") {
-          localStorage.setItem("habitly_mock_user_email", email);
-        }
-        return { data: { session: { user: { id: "mock-user-id", email } } }, error: null };
-      },
-      signUp: async ({ email }: { email: string }) => {
-        if (typeof window !== "undefined") {
-          localStorage.setItem("habitly_mock_user_email", email);
-        }
-        return { data: { session: { user: { id: "mock-user-id", email } } }, error: null };
-      },
-      signOut: async () => {
-        if (typeof window !== "undefined") {
-          localStorage.removeItem("habitly_mock_user_email");
-        }
-        return { error: null };
-      },
+      getUser: async () => ({ data: { user: null }, error: unconfiguredError }),
+      getSession: async () => ({ data: { session: null }, error: null }),
+      signInWithPassword: async () => ({ data: { session: null, user: null }, error: unconfiguredError }),
+      signUp: async () => ({ data: { session: null, user: null }, error: unconfiguredError }),
+      signOut: async () => ({ error: null }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
     },
-    from: (table: string) => new MockQueryBuilder(table),
-  };
+    from: (_table: string) => {
+      const emptyBuilder: any = {
+        select: () => emptyBuilder,
+        order: () => emptyBuilder,
+        eq: () => emptyBuilder,
+        gte: () => emptyBuilder,
+        lte: () => emptyBuilder,
+        in: () => emptyBuilder,
+        single: () => emptyBuilder,
+        maybeSingle: () => emptyBuilder,
+        insert: () => emptyBuilder,
+        update: () => emptyBuilder,
+        upsert: () => emptyBuilder,
+        delete: () => emptyBuilder,
+        then: (onFulfilled: any) => Promise.resolve(onFulfilled({ data: null, error: unconfiguredError })),
+      };
+      return emptyBuilder;
+    },
+  } as any;
 }
 
-let client: ReturnType<typeof createBrowserClient> | any = null;
+/**
+ * Migration helper: if user previously had mock items in localStorage from offline mode,
+ * migrate them into their real Supabase account under user.id.
+ */
+export async function migrateLocalDataToSupabase(userId: string): Promise<{ migratedHabits: number; migratedTodos: number }> {
+  if (typeof window === "undefined" || !userId) return { migratedHabits: 0, migratedTodos: 0 };
+  const db = sb();
+  let migratedHabits = 0;
+  let migratedTodos = 0;
 
-export function sb() {
-  if (!client) {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (isConfigured(url, anon)) {
-      client = createBrowserClient(url!, anon!);
-    } else {
-      client = createMockBrowserClient();
+  try {
+    // 1. Habits
+    const rawHabits = localStorage.getItem("habitly_mock_habits");
+    if (rawHabits) {
+      const items = JSON.parse(rawHabits);
+      if (Array.isArray(items) && items.length > 0) {
+        for (const h of items) {
+          const { error } = await db.from("habits").insert({
+            user_id: userId,
+            name: h.name,
+            monthly_target: h.monthly_target || null,
+            color: h.color || "#5B3DF5",
+            sort: h.sort || 0,
+            archived: Boolean(h.archived),
+          });
+          if (!error) migratedHabits++;
+        }
+      }
+      localStorage.removeItem("habitly_mock_habits");
     }
+
+    // 2. Todos
+    const rawTodos = localStorage.getItem("habitly_mock_todos");
+    if (rawTodos) {
+      const items = JSON.parse(rawTodos);
+      if (Array.isArray(items) && items.length > 0) {
+        for (const t of items) {
+          const { error } = await db.from("todos").insert({
+            user_id: userId,
+            day: t.day,
+            title: t.title,
+            done: Boolean(t.done),
+            remind_time: t.remind_time || null,
+            remind_date: t.remind_date || null,
+            event_type: t.event_type || null,
+            duration_minutes: t.duration_minutes || null,
+          });
+          if (!error) migratedTodos++;
+        }
+      }
+      localStorage.removeItem("habitly_mock_todos");
+    }
+
+    // 3. Clean up other mock keys
+    localStorage.removeItem("habitly_mock_goals");
+    localStorage.removeItem("habitly_mock_habit_logs");
+    localStorage.removeItem("habitly_mock_habit_targets");
+    localStorage.removeItem("habitly_mock_user_settings");
+    localStorage.removeItem("habitly_mock_user_email");
+  } catch (err) {
+    console.error("Migration error:", err);
   }
-  return client;
+
+  return { migratedHabits, migratedTodos };
 }

@@ -18,8 +18,10 @@ export async function GET(req: NextRequest) {
     c.setCredentials(tokens);
     const info = tokens.id_token ? JSON.parse(Buffer.from(tokens.id_token.split(".")[1], "base64").toString()) : {};
     const db = adminClient();
-    await db.from("google_tokens").upsert({ user_id: userId, refresh_token: tokens.refresh_token, updated_at: new Date().toISOString() });
-    await db.from("user_settings").upsert({ user_id: userId, google_email: info.email ?? null }, { onConflict: "user_id" });
+    if (db) {
+      await db.from("google_tokens").upsert({ user_id: userId, refresh_token: tokens.refresh_token, updated_at: new Date().toISOString() });
+      await db.from("user_settings").upsert({ user_id: userId, google_email: info.email ?? null }, { onConflict: "user_id" });
+    }
     const res = back("google=ok");
     res.cookies.delete("g_state");
     return res;

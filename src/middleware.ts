@@ -1,26 +1,26 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-
-function isConfigured(url?: string, key?: string): boolean {
-  if (!url || !key) return false;
-  if (!url.startsWith("http")) return false;
-  if (url.includes("xxxx") || url.includes("placeholder") || url.includes("example") || url.includes("your-")) return false;
-  if (key === "eyJ..." || key.includes("...") || key.length < 20) return false;
-  return true;
-}
+import { isValidSupabaseKey, isValidSupabaseUrl } from "@/lib/supabase-config";
 
 export async function middleware(req: NextRequest) {
   let res = NextResponse.next({ request: req });
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  if (!isConfigured(supabaseUrl, supabaseKey)) {
-    // Supabase credentials are placeholder or unconfigured — allow full mock access
+  const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || "").trim();
+  const supabaseKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "").trim();
+
+  const isLogin = req.nextUrl.pathname.startsWith("/login");
+  const isApi = req.nextUrl.pathname.startsWith("/api");
+
+  // If Supabase credentials are not configured in project env, stay on /login
+  if (!isValidSupabaseUrl(supabaseUrl) || !isValidSupabaseKey(supabaseKey)) {
+    if (!isLogin && !isApi) {
+      return NextResponse.redirect(new URL("/login", req.url));
+    }
     return res;
   }
 
   try {
-    const supabase = createServerClient(supabaseUrl!, supabaseKey!, {
+    const supabase = createServerClient(supabaseUrl, supabaseKey, {
       cookies: {
         getAll: () => req.cookies.getAll(),
         setAll: (list: { name: string; value: string; options?: any }[]) => {
@@ -30,16 +30,30 @@ export async function middleware(req: NextRequest) {
         },
       },
     });
+
     const { data } = await supabase.auth.getUser();
-    const isLogin = req.nextUrl.pathname.startsWith("/login");
-    if (!data?.user && !isLogin) return NextResponse.redirect(new URL("/login", req.url));
-    if (data?.user && isLogin) return NextResponse.redirect(new URL("/", req.url));
+    const user = data?.user;
+
+    // Unauthenticated user attempting to access private app pages
+    if (!user && !isLogin && !isApi) {
+      return NextResponse.redirect(new URL("/login", req.url));
+    }
+
+    // Authenticated user trying to access /login
+    if (user && isLogin) {
+      return NextResponse.redirect(new URL("/", req.url));
+    }
   } catch {
-    // If Supabase check fails, allow pass-through
+    if (!isLogin && !isApi) {
+      return NextResponse.redirect(new URL("/login", req.url));
+    }
   }
+
   return res;
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|sw.js|manifest.webmanifest|icons/|favicon.ico|api/google/callback).*)"],
+  matcher: [
+    "/((?!_next/static|_next/image|sw.js|manifest.webmanifest|icons/|favicon.ico|api/google/callback).*)",
+  ],
 };

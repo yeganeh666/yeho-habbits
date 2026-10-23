@@ -9,7 +9,9 @@ export const oauthClient = () =>
   new OAuth2Client(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET, `${process.env.APP_URL || "http://localhost:3000"}/api/google/callback`);
 
 export async function authedClient(userId: string) {
-  const { data } = await adminClient().from("google_tokens").select("refresh_token").eq("user_id", userId).maybeSingle();
+  const db = adminClient();
+  if (!db) return null;
+  const { data } = await db.from("google_tokens").select("refresh_token").eq("user_id", userId).maybeSingle();
   if (!data) return null;
   const c = oauthClient();
   c.setCredentials({ refresh_token: data.refresh_token });

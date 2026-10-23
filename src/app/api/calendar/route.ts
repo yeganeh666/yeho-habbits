@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { adminClient, currentUser } from "@/lib/supabase-server";
+import { adminClient, currentUser, serverClient } from "@/lib/supabase-server";
 import { authedClient, gfetch } from "@/lib/google";
 import { todayISO } from "@/lib/jalali";
 import { callAppsScript } from "@/lib/apps-script";
@@ -17,7 +17,7 @@ const addMinutes = (t: string, mins: number) => {
 
 /**
  * POST { kind:'todo'|'habit', id, time?, date?, type?:'reminder'|'meeting', durationMinutes?:number, scriptUrl?, title?, name?, eventId? }
- * ثبت یا حذف یادآور و جلسه در تقویم گوگل و همگام‌سازی اطلاعات در Supabase و لوکال
+ * ثبت یا حذف یادآور و جلسه در تقویم گوگل و همگام‌سازی اطلاعات در Supabase
  */
 export async function POST(req: Request) {
   const user = await currentUser();
@@ -44,26 +44,29 @@ export async function POST(req: Request) {
     eventId,
   } = bodyData;
 
-  const db = adminClient();
+  const db = adminClient() || serverClient();
   const table = kind === "habit" ? "habits" : "todos";
   const col = kind === "habit" ? "reminder_event_id" : "event_id";
   const timeCol = kind === "habit" ? "reminder_time" : "remind_time";
 
   // استخراج ردیف در صورت وجود در دیتابیس Supabase
   let row: any = null;
-  if (id && !String(id).startsWith("mock_")) {
-    try {
-      const { data } = await db.from(table).select("*").eq("id", id).maybeSingle();
-      row = data;
-    } catch {}
-  } else if (id) {
+  if (db && id) {
     try {
       const { data } = await db.from(table).select("*").eq("id", id).maybeSingle();
       row = data;
     } catch {}
   }
 
-  // عنوان و تاریخ هدف (حتی در صورت عدم وجود ردیف در سرور، از مقادیر ارسالی یا پیش‌فرض استفاده می‌شود)
+  const updateRow = async (patch: Record<string, any>) => {
+    if (db && row && id) {
+      try {
+        await db.from(table).update(patch).eq("id", id);
+      } catch {}
+    }
+  };
+
+  // عنوان و تاریخ هدف
   const fallbackTitle = kind === "habit" ? "عادت روزانه" : "کار روزانه";
   const rawTitle = (title || name || (row ? (kind === "habit" ? row.name : row.title) : "") || fallbackTitle).trim();
   const targetDate = date || (row ? (kind === "habit" ? todayISO() : row.day) : todayISO()) || todayISO();
@@ -80,7 +83,7 @@ export async function POST(req: Request) {
   if (!scriptUrlToUse && process.env.GOOGLE_APPS_SCRIPT_URL) {
     scriptUrlToUse = process.env.GOOGLE_APPS_SCRIPT_URL.trim();
   }
-  if (!scriptUrlToUse) {
+  if (!scriptUrlToUse && db) {
     try {
       const { data: st } = await db.from("user_settings").select("script_url").eq("user_id", user.id).maybeSingle();
       scriptUrlToUse = st?.script_url || "";
@@ -112,7 +115,7 @@ export async function POST(req: Request) {
         patch.event_type = null;
         patch.duration_minutes = null;
       }
-      await db.from(table).update(patch).eq("id", id).catch(() => null);
+      await updateRow(patch);
     }
     return NextResponse.json({ ok: true, deleted: true });
   }
@@ -141,7 +144,7 @@ export async function POST(req: Request) {
           patch.event_type = eventType;
           patch.duration_minutes = duration;
         }
-        await db.from(table).update(patch).eq("id", id).catch(() => null);
+        await updateRow(patch);
       }
 
       return NextResponse.json({
@@ -187,7 +190,7 @@ export async function POST(req: Request) {
           patch.event_type = eventType;
           patch.duration_minutes = duration;
         }
-        await db.from(table).update(patch).eq("id", id).catch(() => null);
+        await updateRow(patch);
       }
 
       return NextResponse.json({
@@ -205,7 +208,7 @@ export async function POST(req: Request) {
   }
 
   // ۴. در صورتی که اتصال مستقیم هنوز انجام نشده است:
-  // تولید شناسه رویداد محلی و لینک وب اینتنت تقویم گوگل تا بدون خطا کار انجام شود و با یک کلیک در تقویم گوشی باز شود
+  // تولید شناسه رویداد محلی و لینک وب اینتنت تقویم گوگل
   const cleanTime = hhmm(time);
   const startCompact = `${targetDate.replace(/-/g, "")}T${cleanTime.replace(":", "")}00`;
   const endHHMM = addMinutes(cleanTime, duration);
@@ -221,7 +224,7 @@ export async function POST(req: Request) {
       patch.event_type = eventType;
       patch.duration_minutes = duration;
     }
-    await db.from(table).update(patch).eq("id", id).catch(() => null);
+    await updateRow(patch);
   }
 
   const generatedEventId = `intent_${Date.now()}`;

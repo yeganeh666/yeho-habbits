@@ -13,14 +13,6 @@ export function getLocalScriptUrl(): string {
   try {
     const direct = localStorage.getItem("habitly_calendar_script_url") || localStorage.getItem("calendar_script_url");
     if (direct && direct.trim()) return direct.trim();
-    const raw = localStorage.getItem("habitly_mock_user_settings");
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      const first = Array.isArray(parsed) ? parsed[0] : parsed;
-      if (first?.script_url && typeof first.script_url === "string") {
-        return first.script_url.trim();
-      }
-    }
   } catch {}
   return "";
 }
@@ -50,26 +42,41 @@ export function useMonth(jy: number, jm: number) {
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    const { start, end } = monthRange(jy, jm);
-    const db = sb();
-    const [h, l, t, g] = await Promise.all([
-      db.from("habits").select("*").order("sort").order("created_at"),
-      db.from("habit_logs").select("habit_id,day,done").gte("day", start).lte("day", end),
-      db.from("habit_targets").select("habit_id,target").eq("jy", jy).eq("jm", jm),
-      db.from("goals").select("*").eq("jy", jy).eq("jm", jm).eq("deleted", false).order("created_at"),
-    ]);
+    try {
+      const db = sb();
+      const { data: u } = await db.auth.getUser();
+      if (!u?.user) {
+        setHabits([]);
+        setLogs({});
+        setTargets({});
+        setGoals([]);
+        setLoading(false);
+        return;
+      }
 
-    const logMap: Record<string, boolean> = {};
-    (l.data ?? []).forEach((x: any) => {
-      if (x.done) logMap[`${x.habit_id}|${x.day}`] = true;
-    });
+      const { start, end } = monthRange(jy, jm);
+      const [h, l, t, g] = await Promise.all([
+        db.from("habits").select("*").order("sort").order("created_at"),
+        db.from("habit_logs").select("habit_id,day,done").gte("day", start).lte("day", end),
+        db.from("habit_targets").select("habit_id,target").eq("jy", jy).eq("jm", jm),
+        db.from("goals").select("*").eq("jy", jy).eq("jm", jm).eq("deleted", false).order("created_at"),
+      ]);
 
-    const hs = ((h.data ?? []) as Habit[]).filter((x) => !x.archived || Object.keys(logMap).some((k) => k.startsWith(x.id)));
-    setHabits(hs);
-    setLogs(logMap);
-    setTargets(Object.fromEntries((t.data ?? []).map((x: any) => [x.habit_id, x.target])));
-    setGoals((g.data ?? []) as Goal[]);
-    setLoading(false);
+      const logMap: Record<string, boolean> = {};
+      (l.data ?? []).forEach((x: any) => {
+        if (x.done) logMap[`${x.habit_id}|${x.day}`] = true;
+      });
+
+      const hs = ((h.data ?? []) as Habit[]).filter((x) => !x.archived || Object.keys(logMap).some((k) => k.startsWith(x.id)));
+      setHabits(hs);
+      setLogs(logMap);
+      setTargets(Object.fromEntries((t.data ?? []).map((x: any) => [x.habit_id, x.target])));
+      setGoals((g.data ?? []) as Goal[]);
+    } catch (err: any) {
+      console.error("Error loading month data:", err);
+    } finally {
+      setLoading(false);
+    }
   }, [jy, jm]);
 
   useEffect(() => {
@@ -89,35 +96,57 @@ export function useMonth(jy: number, jm: number) {
       else delete n[key];
       return n;
     });
+
+    const { data: u } = await sb().auth.getUser();
+    if (!u?.user) {
+      toast("لطفاً ابتدا وارد حساب خود شوید");
+      return;
+    }
+
     const { error } = await sb().from("habit_logs").upsert({
+      user_id: u.user.id,
       habit_id: h.id,
       day,
       done: next,
       updated_at: new Date().toISOString(),
     });
+
     if (error) {
-      toast("ذخیره نشد؛ لطفاً دوباره تلاش کنید");
+      toast(error.message || "ذخیره در Supabase انجام نشد؛ دوباره تلاش کنید");
       load();
     }
   }
 
   async function addHabit(v: { name: string; target: number | null; color: string }) {
+    const { data: u } = await sb().auth.getUser();
+    if (!u?.user) {
+      return toast("لطفاً ابتدا وارد حساب کاربری شوید");
+    }
+
     const { data, error } = await sb().from("habits").insert({
+      user_id: u.user.id,
       name: v.name,
       monthly_target: v.target,
       color: v.color,
       sort: habits.length,
     }).select().single();
 
-    if (error || !data) return toast("عادت اضافه نشد");
+    if (error || !data) {
+      return toast(error?.message || "عادت در پایگاه داده ذخیره نشد");
+    }
+
     if (v.target) {
       await sb().from("habit_targets").upsert({ habit_id: data.id, jy, jm, target: v.target });
     }
+    toast("عادت جدید در دیتابیس Supabase ثبت شد ✓");
     await load();
   }
 
   async function updateHabit(id: string, patch: Partial<Habit>, target?: number | null) {
-    await sb().from("habits").update(patch).eq("id", id);
+    const { error } = await sb().from("habits").update(patch).eq("id", id);
+    if (error) {
+      toast(error.message || "ویرایش انجام نشد");
+    }
     if (target) {
       await sb().from("habit_targets").upsert({ habit_id: id, jy, jm, target });
     }
@@ -125,14 +154,18 @@ export function useMonth(jy: number, jm: number) {
   }
 
   async function addGoal(scope: "week" | "month", slot: number, title: string) {
+    const { data: u } = await sb().auth.getUser();
+    if (!u?.user) return toast("لطفاً وارد حساب شوید");
+
     const { error } = await sb().from("goals").insert({
+      user_id: u.user.id,
       scope,
       jy,
       jm,
       slot,
       title,
     });
-    if (error) return toast("هدف اضافه نشد");
+    if (error) return toast(error.message || "هدف در دیتابیس ذخیره نشد");
     await load();
   }
 
@@ -170,15 +203,32 @@ export function useTodos(start: string, end: string) {
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    const { data } = await sb()
-      .from("todos")
-      .select("*")
-      .gte("day", start)
-      .lte("day", end)
-      .order("remind_time", { nullsFirst: false })
-      .order("created_at");
-    setTodos((data ?? []) as Todo[]);
-    setLoading(false);
+    try {
+      const db = sb();
+      const { data: u } = await db.auth.getUser();
+      if (!u?.user) {
+        setTodos([]);
+        setLoading(false);
+        return;
+      }
+
+      const { data, error } = await db
+        .from("todos")
+        .select("*")
+        .gte("day", start)
+        .lte("day", end)
+        .order("remind_time", { nullsFirst: false })
+        .order("created_at");
+
+      if (error) {
+        console.error("Error fetching todos from Supabase:", error);
+      }
+      setTodos((data ?? []) as Todo[]);
+    } catch (err: any) {
+      console.error("Error loading todos:", err);
+    } finally {
+      setLoading(false);
+    }
   }, [start, end]);
 
   useEffect(() => {
@@ -243,10 +293,16 @@ export function useTodos(start: string, end: string) {
     type: "reminder" | "meeting" = "reminder",
     durationMinutes = 30
   ) {
+    const { data: u } = await sb().auth.getUser();
+    if (!u?.user) {
+      return toast("لطفاً ابتدا وارد حساب کاربری خود شوید");
+    }
+
     const targetDate = date || day;
     const { data, error } = await sb()
       .from("todos")
       .insert({
+        user_id: u.user.id,
         day,
         title,
         remind_time: time || null,
@@ -257,25 +313,37 @@ export function useTodos(start: string, end: string) {
       .select()
       .single();
 
-    if (error || !data) return toast("کار اضافه نشد");
+    if (error || !data) {
+      return toast(error?.message || "کار در پایگاه داده اضافه نشد");
+    }
+
     if (time) {
       const res = await calendar("todo", data.id, time, targetDate, type, durationMinutes, title);
       if (res && res.eventId) {
         await sb().from("todos").update({ event_id: res.eventId }).eq("id", data.id);
       }
     }
+    toast("کار با موفقیت در Supabase ثبت شد ✓");
     await load();
   }
 
   async function toggle(t: Todo) {
     setTodos((p) => p.map((x) => (x.id === t.id ? { ...x, done: !x.done } : x)));
-    await sb().from("todos").update({ done: !t.done }).eq("id", t.id);
+    const { error } = await sb().from("todos").update({ done: !t.done }).eq("id", t.id);
+    if (error) {
+      toast("تغییر وضعیت ذخیره نشد");
+      load();
+    }
   }
 
   async function remove(t: Todo) {
     setTodos((p) => p.filter((x) => x.id !== t.id));
     if (t.event_id) await calendar("todo", t.id, null, null, undefined, undefined, t.title, t.event_id);
-    await sb().from("todos").delete().eq("id", t.id);
+    const { error } = await sb().from("todos").delete().eq("id", t.id);
+    if (error) {
+      toast("حذف کار انجام نشد");
+      load();
+    }
   }
 
   async function setReminder(
