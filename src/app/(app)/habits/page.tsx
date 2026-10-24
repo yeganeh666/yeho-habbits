@@ -103,7 +103,7 @@ export default function HabitsMonth() {
         onEdit={() => { if (detailHabit) { const h = detailHabit; setDetail(null); openEdit(h); } }} />
 
       <HabitSheet open={open} onClose={() => setOpen(false)} habit={edit} monthLen={len} presetName={preset} defaultTarget={edit ? m.targetOf(edit) : len}
-        onSave={async (v) => { edit ? await m.updateHabit(edit.id, { name: v.name, color: v.color }, v.target) : await m.addHabit({ name: v.name, target: v.target, color: v.color }); }}
+        onSave={async (v) => { edit ? await m.updateHabit(edit.id, { name: v.name, color: v.color, ...(v.isPrivate !== !!edit.is_private ? { is_private: v.isPrivate } : {}) }, v.target) : await m.addHabit({ name: v.name, target: v.target, color: v.color, is_private: v.isPrivate }); }}
         onArchive={edit ? async () => { await m.updateHabit(edit.id, { archived: true }); } : undefined} />
     </main>
   );

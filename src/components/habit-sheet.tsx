@@ -11,17 +11,17 @@ export const COLORS = ["#5B3DF5", "#26BCD0", "#AA3487", "#F5A028", "#2FA66A", "#
 const SUGGESTIONS = ["نوشیدن آب", "مطالعه", "ورزش", "مدیتیشن", "پیاده‌روی", "خواب منظم"];
 
 export function HabitSheet({ open, onClose, habit, defaultTarget, monthLen = 30, presetName = "", onSave, onArchive }:
-  { open: boolean; onClose: () => void; habit: Habit | null; defaultTarget: number; monthLen?: number; presetName?: string; onSave: (v: { name: string; target: number; color: string }) => Promise<void>; onArchive?: () => Promise<void> }) {
+  { open: boolean; onClose: () => void; habit: Habit | null; defaultTarget: number; monthLen?: number; presetName?: string; onSave: (v: { name: string; target: number; color: string; isPrivate: boolean }) => Promise<void>; onArchive?: () => Promise<void> }) {
   const [name, setName] = useState(""); const [target, setTarget] = useState(defaultTarget); const [color, setColor] = useState(COLORS[0]);
-  const [time, setTime] = useState(""); const [busy, setBusy] = useState(false);
+  const [time, setTime] = useState(""); const [busy, setBusy] = useState(false); const [priv, setPriv] = useState(false);
   useEffect(() => {
     if (!open) return;
-    setName(habit?.name.trim() ?? presetName); setTarget(defaultTarget); setColor(habit?.color ?? COLORS[0]); setTime(habit?.reminder_time?.slice(0, 5) ?? "");
+    setName(habit?.name.trim() ?? presetName); setTarget(defaultTarget); setColor(habit?.color ?? COLORS[0]); setTime(habit?.reminder_time?.slice(0, 5) ?? ""); setPriv(!!habit?.is_private);
   }, [open, habit, defaultTarget, presetName]);
 
   async function save() {
     if (!name.trim()) return;
-    setBusy(true); await onSave({ name: name.trim(), target, color });
+    setBusy(true); await onSave({ name: name.trim(), target, color, isPrivate: priv });
     if (habit && time !== (habit.reminder_time?.slice(0, 5) ?? "")) {
       const scriptUrl = getLocalScriptUrl();
       const r = await fetch("/api/calendar", {
@@ -78,6 +78,10 @@ export function HabitSheet({ open, onClose, habit, defaultTarget, monthLen = 30,
           </button>
         ))}</div>
       </Field>
+      <button type="button" role="switch" aria-checked={priv} onClick={() => setPriv(!priv)} className="mb-4 flex w-full items-center gap-3 rounded-2xl bg-bg p-3.5 text-start">
+        <span className="min-w-0 flex-1"><span className="block text-sm font-bold">پنهان از دوستان</span><span className="block text-xs text-mute">این عادت در جدول دوستانت دیده نمی‌شود</span></span>
+        <span className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${priv ? "bg-brand" : "bg-line"}`}><span className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-all ${priv ? "start-[22px]" : "start-0.5"}`} /></span>
+      </button>
       {habit && (
         <Field label="یادآور روزانه در تقویم گوگل (اختیاری)">
           <div className="flex gap-2"><input className={inputCls} type="time" value={time} onChange={(e) => setTime(e.target.value)} />

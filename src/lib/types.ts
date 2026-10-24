@@ -5,6 +5,7 @@ export type Habit = {
   color: string;
   sort: number;
   archived: boolean;
+  is_private?: boolean;
   reminder_time: string | null;
   reminder_event_id: string | null;
 };

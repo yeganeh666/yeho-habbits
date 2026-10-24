@@ -117,7 +117,7 @@ export function useMonth(jy: number, jm: number) {
     }
   }
 
-  async function addHabit(v: { name: string; target: number | null; color: string }) {
+  async function addHabit(v: { name: string; target: number | null; color: string; is_private?: boolean }) {
     const { data: u } = await sb().auth.getUser();
     if (!u?.user) {
       return toast("لطفاً ابتدا وارد حساب کاربری شوید");
@@ -128,6 +128,7 @@ export function useMonth(jy: number, jm: number) {
       name: v.name,
       monthly_target: v.target,
       color: v.color,
+      ...(v.is_private ? { is_private: true } : {}),
       sort: habits.length,
     }).select().single();
 

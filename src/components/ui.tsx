@@ -131,6 +131,7 @@ const TABS = [
   { href: "/pomodoro", label: "پومودورو", icon: I("M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0zM10 2h4") },
   { href: "/todos", label: "کارها", icon: I("M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2") },
   { href: "/stats", label: "آمار", icon: I("M5 20V10M12 20V4M19 20v-7") },
+  { href: "/friends", label: "دوستان", icon: I("M9 11a3.5 3.5 0 100-7 3.5 3.5 0 000 7zM2.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5M16.5 4.4a3.5 3.5 0 010 6.7M18 14.8c2.2.6 3.5 2.3 3.5 5.2") },
 ];
 
 export function BottomNav() {
