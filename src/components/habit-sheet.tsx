@@ -3,18 +3,21 @@ import { useEffect, useState } from "react";
 import { btnGhost, btnPrimary, Field, inputCls, Sheet } from "./ui";
 import { getLocalScriptUrl, toast } from "@/lib/data";
 import { sb } from "@/lib/supabase-browser";
+import { fa } from "@/lib/jalali";
 import type { Habit } from "@/lib/types";
 
 export const COLORS = ["#5B3DF5", "#26BCD0", "#AA3487", "#F5A028", "#2FA66A", "#E5484D"];
 
-export function HabitSheet({ open, onClose, habit, defaultTarget, onSave, onArchive }:
-  { open: boolean; onClose: () => void; habit: Habit | null; defaultTarget: number; onSave: (v: { name: string; target: number; color: string }) => Promise<void>; onArchive?: () => Promise<void> }) {
+const SUGGESTIONS = ["نوشیدن آب", "مطالعه", "ورزش", "مدیتیشن", "پیاده‌روی", "خواب منظم"];
+
+export function HabitSheet({ open, onClose, habit, defaultTarget, monthLen = 30, presetName = "", onSave, onArchive }:
+  { open: boolean; onClose: () => void; habit: Habit | null; defaultTarget: number; monthLen?: number; presetName?: string; onSave: (v: { name: string; target: number; color: string }) => Promise<void>; onArchive?: () => Promise<void> }) {
   const [name, setName] = useState(""); const [target, setTarget] = useState(defaultTarget); const [color, setColor] = useState(COLORS[0]);
   const [time, setTime] = useState(""); const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (!open) return;
-    setName(habit?.name.trim() ?? ""); setTarget(defaultTarget); setColor(habit?.color ?? COLORS[0]); setTime(habit?.reminder_time?.slice(0, 5) ?? "");
-  }, [open, habit, defaultTarget]);
+    setName(habit?.name.trim() ?? presetName); setTarget(defaultTarget); setColor(habit?.color ?? COLORS[0]); setTime(habit?.reminder_time?.slice(0, 5) ?? "");
+  }, [open, habit, defaultTarget, presetName]);
 
   async function save() {
     if (!name.trim()) return;
@@ -48,11 +51,31 @@ export function HabitSheet({ open, onClose, habit, defaultTarget, onSave, onArch
   return (
     <Sheet open={open} onClose={onClose} title={habit ? "ویرایش عادت" : "عادت جدید"}>
       <Field label="نام عادت"><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="مثلاً ۲ صفحه قرآن" autoFocus /></Field>
-      <Field label="هدف این ماه (چند روز؟)"><input className={inputCls} type="number" min={1} max={31} value={target} onChange={(e) => setTarget(+e.target.value)} /></Field>
+      {!habit && (
+        <div className="-mt-2 mb-5 flex flex-wrap gap-2">
+          {SUGGESTIONS.map((x) => (
+            <button key={x} type="button" onClick={() => setName(x)} className={`rounded-full px-3.5 py-1.5 text-sm font-semibold transition-colors ${name === x ? "bg-brand text-white" : "bg-soft text-brand"}`}>{x}</button>
+          ))}
+        </div>
+      )}
+      <Field label="هدف این ماه (چند روز؟)">
+        <div className="flex items-center gap-3 rounded-2xl border border-line bg-bg p-1.5">
+          <button type="button" aria-label="کمتر" onClick={() => setTarget((t) => Math.max(1, (t || 1) - 1))} className="grid h-11 w-11 place-items-center rounded-xl bg-surface text-xl font-bold shadow-card active:scale-95">−</button>
+          <div className="flex-1 text-center"><span className="text-2xl font-extrabold">{fa(target || 1)}</span><span className="ms-1.5 text-sm font-semibold text-mute">روز</span></div>
+          <button type="button" aria-label="بیشتر" onClick={() => setTarget((t) => Math.min(monthLen, (t || 0) + 1))} className="grid h-11 w-11 place-items-center rounded-xl bg-surface text-xl font-bold shadow-card active:scale-95">+</button>
+        </div>
+        <div className="mt-2.5 flex gap-2">
+          {Array.from(new Set([monthLen, 25, 20, 15, 10])).filter((v) => v <= monthLen).map((v) => (
+            <button key={v} type="button" onClick={() => setTarget(v)} className={`flex-1 rounded-xl py-2 text-xs font-bold transition-colors ${target === v ? "bg-brand text-white" : "bg-soft text-brand"}`}>{v === monthLen ? "هر روز" : fa(v)}</button>
+          ))}
+        </div>
+      </Field>
       <Field label="رنگ">
-        <div className="flex gap-3">{COLORS.map((c) => (
+        <div className="flex justify-between">{COLORS.map((c) => (
           <button key={c} type="button" onClick={() => setColor(c)} aria-label={`رنگ ${c}`} aria-pressed={color === c}
-            className="h-9 w-9 rounded-full ring-offset-2 ring-offset-surface" style={{ background: c, boxShadow: color === c ? `0 0 0 3px ${c}55, 0 0 0 2px rgb(var(--surface)) inset` : undefined, outline: color === c ? `2px solid ${c}` : undefined, outlineOffset: 3 }} />
+            className="grid h-11 w-11 place-items-center rounded-full transition-transform active:scale-90" style={{ background: c, boxShadow: color === c ? `0 0 0 3px rgb(var(--surface)), 0 0 0 5px ${c}` : undefined }}>
+            {color === c && <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>}
+          </button>
         ))}</div>
       </Field>
       {habit && (
