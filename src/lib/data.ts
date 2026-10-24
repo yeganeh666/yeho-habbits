@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { sb } from "./supabase-browser";
-import { monthLength, monthRange, toISO } from "./jalali";
+import { monthLength, monthRange, prettyDate, toISO } from "./jalali";
 import type { Goal, Habit, Todo } from "./types";
 
 export function toast(msg: string) {
@@ -198,6 +198,9 @@ export function useMonth(jy: number, jm: number) {
 }
 
 /* ---------- کارهای روزانه و رویدادهای تقویم در Supabase ---------- */
+/** روزی که کار/رویداد باید در آن دیده شود: تاریخ رویداد در تقویم، نه روز ساخته‌شدن */
+export const todoDay = (t: Todo) => t.remind_date || t.day;
+
 export function useTodos(start: string, end: string) {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -212,18 +215,19 @@ export function useTodos(start: string, end: string) {
         return;
       }
 
+      // هم ردیف‌هایی که day در بازه است و هم آن‌هایی که تاریخ رویدادشان (remind_date) در بازه است
       const { data, error } = await db
         .from("todos")
         .select("*")
-        .gte("day", start)
-        .lte("day", end)
+        .or(`and(day.gte.${start},day.lte.${end}),and(remind_date.gte.${start},remind_date.lte.${end})`)
         .order("remind_time", { nullsFirst: false })
         .order("created_at");
 
       if (error) {
         console.error("Error fetching todos from Supabase:", error);
       }
-      setTodos((data ?? []) as Todo[]);
+      // نمایش بر اساس تاریخ رویداد؛ کارِ بدون رویداد همان روز ساخته‌شدن را دارد
+      setTodos(((data ?? []) as Todo[]).filter((x) => todoDay(x) >= start && todoDay(x) <= end));
     } catch (err: any) {
       console.error("Error loading todos:", err);
     } finally {
@@ -303,7 +307,8 @@ export function useTodos(start: string, end: string) {
       .from("todos")
       .insert({
         user_id: u.user.id,
-        day,
+        // اگر رویداد تقویم دارد، کار در همان تاریخ رویداد دیده می‌شود
+        day: time ? targetDate : day,
         title,
         remind_time: time || null,
         remind_date: time ? targetDate : null,
@@ -323,7 +328,7 @@ export function useTodos(start: string, end: string) {
         await sb().from("todos").update({ event_id: res.eventId }).eq("id", data.id);
       }
     }
-    toast("کار با موفقیت در Supabase ثبت شد ✓");
+    toast(time && targetDate !== day ? `کار برای ${prettyDate(targetDate)} ثبت شد ✓` : "کار با موفقیت در Supabase ثبت شد ✓");
     await load();
   }
 
@@ -358,6 +363,7 @@ export function useTodos(start: string, end: string) {
       const res = await calendar("todo", t.id, time, targetDate, type, durationMinutes, t.title, t.event_id);
       if (res && res.ok) {
         await sb().from("todos").update({
+          day: res.date || targetDate,
           remind_time: time,
           remind_date: res.date || targetDate,
           event_type: type,

@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { addDays, fa, fromISO, MONTHS, prettyDate, todayISO, WEEKDAYS_SHORT, weekStartISO } from "@/lib/jalali";
-import { useTodos } from "@/lib/data";
+import { todoDay, useTodos } from "@/lib/data";
 import { btnGhost, btnPrimary, CalendarBadge, Check, Donut, Field, inputCls, pctText, Sheet } from "@/components/ui";
 import { JalaliCalendarModal } from "@/components/calendar-picker";
 import type { Todo } from "@/lib/types";
@@ -34,7 +34,7 @@ export default function Todos() {
 
   const byDay = useMemo(() => {
     const m: Record<string, Todo[]> = {};
-    t.todos.forEach((x) => (m[x.day] ??= []).push(x));
+    t.todos.forEach((x) => (m[todoDay(x)] ??= []).push(x));
     return m;
   }, [t.todos]);
 
@@ -49,7 +49,7 @@ export default function Todos() {
   // آمار ۱۴ روز تا روز انتخابی (یا امروز) و ۳۰ روز اخیر
   const end = day > today ? today : day;
   const last14 = Array.from({ length: 14 }, (_, i) => addDays(end, i - 13));
-  const last30 = t.todos.filter((x) => x.day <= end && x.day > addDays(end, -30));
+  const last30 = t.todos.filter((x) => todoDay(x) <= end && todoDay(x) > addDays(end, -30));
   const rate30 = last30.length ? last30.filter((x) => x.done).length / last30.length : 0;
 
   async function add(e: React.FormEvent) {
