@@ -1,11 +1,31 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
-import { sb } from "./supabase-browser";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { sb, sessionUser } from "./supabase-browser";
 import { monthLength, monthRange, prettyDate, toISO } from "./jalali";
 import type { Goal, Habit, Todo } from "./types";
 
 export function toast(msg: string) {
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("toast", { detail: msg }));
+}
+
+/** تبدیل خطاهای فنی پایگاه داده به پیام قابل‌فهم برای کاربر */
+export function friendlyDbError(msg?: string | null, fallback = "مشکلی پیش آمد؛ دوباره تلاش کنید"): string {
+  const m = (msg || "").trim();
+  if (!m) return fallback;
+  // پیام‌هایی که از قبل فارسی هستند را بدون تغییر نشان بده
+  if (/[\u0600-\u06FF]/.test(m)) return m;
+  const low = m.toLowerCase();
+  if (low.includes("failed to fetch") || low.includes("network") || low.includes("fetch failed")) {
+    return "ارتباط با سرور برقرار نشد؛ اتصال اینترنت را بررسی کنید";
+  }
+  if (low.includes("jwt") || low.includes("not authenticated") || low.includes("unauthorized") || low.includes("invalid_token")) {
+    return "نشست شما منقضی شده است؛ دوباره وارد حساب خود شوید";
+  }
+  if (low.includes("row-level security") || low.includes("permission denied")) {
+    return "اجازهٔ انجام این کار را ندارید";
+  }
+  if (low.includes("duplicate") || low.includes("23505")) return "این مورد قبلاً ثبت شده است";
+  return fallback;
 }
 
 export function getLocalScriptUrl(): string {
@@ -33,7 +53,7 @@ export function setLocalScriptUrl(url: string) {
   } catch {}
 }
 
-/* ---------- داده‌های یک ماه شمسی در Supabase ---------- */
+/* ---------- داده‌های یک ماه شمسی ---------- */
 export function useMonth(jy: number, jm: number) {
   const [habits, setHabits] = useState<Habit[]>([]);
   const [logs, setLogs] = useState<Record<string, boolean>>({});
@@ -44,7 +64,7 @@ export function useMonth(jy: number, jm: number) {
   const load = useCallback(async () => {
     try {
       const db = sb();
-      const { data: u } = await db.auth.getUser();
+      const u = await sessionUser();
       if (!u?.user) {
         setHabits([]);
         setLogs({});
@@ -97,7 +117,7 @@ export function useMonth(jy: number, jm: number) {
       return n;
     });
 
-    const { data: u } = await sb().auth.getUser();
+    const u = await sessionUser();
     if (!u?.user) {
       toast("لطفاً ابتدا وارد حساب خود شوید");
       return;
@@ -112,13 +132,13 @@ export function useMonth(jy: number, jm: number) {
     });
 
     if (error) {
-      toast(error.message || "ذخیره در Supabase انجام نشد؛ دوباره تلاش کنید");
+      toast(friendlyDbError(error.message, "ذخیره انجام نشد؛ دوباره تلاش کنید"));
       load();
     }
   }
 
   async function addHabit(v: { name: string; target: number | null; color: string; is_private?: boolean }) {
-    const { data: u } = await sb().auth.getUser();
+    const u = await sessionUser();
     if (!u?.user) {
       return toast("لطفاً ابتدا وارد حساب کاربری شوید");
     }
@@ -133,20 +153,20 @@ export function useMonth(jy: number, jm: number) {
     }).select().single();
 
     if (error || !data) {
-      return toast(error?.message || "عادت در پایگاه داده ذخیره نشد");
+      return toast(friendlyDbError(error?.message, "عادت ذخیره نشد؛ دوباره تلاش کنید"));
     }
 
     if (v.target) {
       await sb().from("habit_targets").upsert({ habit_id: data.id, jy, jm, target: v.target });
     }
-    toast("عادت جدید در دیتابیس Supabase ثبت شد ✓");
+    toast("عادت جدید ثبت شد ✓");
     await load();
   }
 
   async function updateHabit(id: string, patch: Partial<Habit>, target?: number | null) {
     const { error } = await sb().from("habits").update(patch).eq("id", id);
     if (error) {
-      toast(error.message || "ویرایش انجام نشد");
+      toast(friendlyDbError(error.message, "ویرایش انجام نشد؛ دوباره تلاش کنید"));
     }
     if (target) {
       await sb().from("habit_targets").upsert({ habit_id: id, jy, jm, target });
@@ -155,7 +175,7 @@ export function useMonth(jy: number, jm: number) {
   }
 
   async function addGoal(scope: "week" | "month", slot: number, title: string) {
-    const { data: u } = await sb().auth.getUser();
+    const u = await sessionUser();
     if (!u?.user) return toast("لطفاً وارد حساب شوید");
 
     const { error } = await sb().from("goals").insert({
@@ -166,7 +186,7 @@ export function useMonth(jy: number, jm: number) {
       slot,
       title,
     });
-    if (error) return toast(error.message || "هدف در دیتابیس ذخیره نشد");
+    if (error) return toast(friendlyDbError(error.message, "هدف ذخیره نشد؛ دوباره تلاش کنید"));
     await load();
   }
 
@@ -198,18 +218,20 @@ export function useMonth(jy: number, jm: number) {
   };
 }
 
-/* ---------- کارهای روزانه و رویدادهای تقویم در Supabase ---------- */
+/* ---------- کارهای روزانه و رویدادهای تقویم ---------- */
 /** روزی که کار/رویداد باید در آن دیده شود: تاریخ رویداد در تقویم، نه روز ساخته‌شدن */
 export const todoDay = (t: Todo) => t.remind_date || t.day;
 
 export function useTodos(start: string, end: string) {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [loading, setLoading] = useState(true);
+  // اگر ستون sort هنوز در پایگاه داده ساخته نشده باشد، بدون آن کار می‌کنیم
+  const sortReady = useRef(true);
 
   const load = useCallback(async () => {
     try {
       const db = sb();
-      const { data: u } = await db.auth.getUser();
+      const u = await sessionUser();
       if (!u?.user) {
         setTodos([]);
         setLoading(false);
@@ -217,15 +239,22 @@ export function useTodos(start: string, end: string) {
       }
 
       // هم ردیف‌هایی که day در بازه است و هم آن‌هایی که تاریخ رویدادشان (remind_date) در بازه است
-      const { data, error } = await db
-        .from("todos")
-        .select("*")
-        .or(`and(day.gte.${start},day.lte.${end}),and(remind_date.gte.${start},remind_date.lte.${end})`)
-        .order("remind_time", { nullsFirst: false })
-        .order("created_at");
+      const query = (withSort: boolean) => {
+        let q = db
+          .from("todos")
+          .select("*")
+          .or(`and(day.gte.${start},day.lte.${end}),and(remind_date.gte.${start},remind_date.lte.${end})`);
+        if (withSort) q = q.order("sort");
+        return q.order("remind_time", { nullsFirst: false }).order("created_at");
+      };
+      let { data, error } = await query(sortReady.current);
+      if (error && sortReady.current) {
+        sortReady.current = false;
+        ({ data, error } = await query(false));
+      }
 
       if (error) {
-        console.error("Error fetching todos from Supabase:", error);
+        console.error("Error fetching todos:", error);
       }
       // نمایش بر اساس تاریخ رویداد؛ کارِ بدون رویداد همان روز ساخته‌شدن را دارد
       setTodos(((data ?? []) as Todo[]).filter((x) => todoDay(x) >= start && todoDay(x) <= end));
@@ -272,7 +301,9 @@ export function useTodos(start: string, end: string) {
       toast(
         j.error === "not_connected"
           ? j.message || "اول در تنظیمات تقویم گوگل را متصل کنید"
-          : j.error || "خطا در برقراری ارتباط با تقویم گوگل"
+          : j.error === "unauthorized"
+            ? "نشست شما منقضی شده است؛ دوباره وارد حساب خود شوید"
+            : friendlyDbError(j.error, "خطا در برقراری ارتباط با تقویم گوگل")
       );
       return null;
     }
@@ -298,16 +329,21 @@ export function useTodos(start: string, end: string) {
     type: "reminder" | "meeting" = "reminder",
     durationMinutes = 30
   ) {
-    const { data: u } = await sb().auth.getUser();
+    const u = await sessionUser();
     if (!u?.user) {
       return toast("لطفاً ابتدا وارد حساب کاربری خود شوید");
     }
 
     const targetDate = date || day;
+    // کار جدید ته لیست همان روز قرار می‌گیرد
+    const nextSort = todos
+      .filter((x) => todoDay(x) === (time ? targetDate : day))
+      .reduce((m, x) => Math.max(m, (x.sort ?? 0) + 1), 0);
     const { data, error } = await sb()
       .from("todos")
       .insert({
         user_id: u.user.id,
+        ...(sortReady.current ? { sort: nextSort } : {}),
         // اگر رویداد تقویم دارد، کار در همان تاریخ رویداد دیده می‌شود
         day: time ? targetDate : day,
         title,
@@ -320,7 +356,7 @@ export function useTodos(start: string, end: string) {
       .single();
 
     if (error || !data) {
-      return toast(error?.message || "کار در پایگاه داده اضافه نشد");
+      return toast(friendlyDbError(error?.message, "کار اضافه نشد؛ دوباره تلاش کنید"));
     }
 
     if (time) {
@@ -329,7 +365,7 @@ export function useTodos(start: string, end: string) {
         await sb().from("todos").update({ event_id: res.eventId }).eq("id", data.id);
       }
     }
-    toast(time && targetDate !== day ? `کار برای ${prettyDate(targetDate)} ثبت شد ✓` : "کار با موفقیت در Supabase ثبت شد ✓");
+    toast(time && targetDate !== day ? `کار برای ${prettyDate(targetDate)} ثبت شد ✓` : "کار با موفقیت ثبت شد ✓");
     await load();
   }
 
@@ -350,6 +386,62 @@ export function useTodos(start: string, end: string) {
       toast("حذف کار انجام نشد");
       load();
     }
+  }
+
+  /** ذخیرهٔ ترتیب جدید کارهای یک روز (الویت‌بندی) */
+  async function reorder(ordered: Todo[]) {
+    const pos = new Map(ordered.map((x, i) => [x.id, i]));
+    setTodos((p) =>
+      p
+        .map((x) => (pos.has(x.id) ? { ...x, sort: pos.get(x.id)! } : x))
+        .sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
+    );
+    const changed = ordered.filter((x, i) => (x.sort ?? 0) !== i);
+    if (!changed.length) return;
+    const results = await Promise.all(
+      changed.map((x) => sb().from("todos").update({ sort: pos.get(x.id) }).eq("id", x.id))
+    );
+    if (results.some((r) => r.error)) {
+      toast("ذخیرهٔ ترتیب کارها انجام نشد؛ دوباره تلاش کنید");
+      load();
+    }
+  }
+
+  async function update(t: Todo, patch: { title: string; date: string }) {
+    const title = patch.title.trim();
+    if (!title) return null;
+    const date = patch.date || todoDay(t);
+    const unchanged = title === t.title && date === todoDay(t);
+    if (unchanged) return { ok: true };
+
+    const fields: Record<string, unknown> = { title, day: date };
+
+    if (t.remind_time) {
+      // کار دارای رویداد تقویم است؛ رویداد را هم با عنوان و تاریخ جدید همگام می‌کنیم
+      const res = await calendar(
+        "todo",
+        t.id,
+        t.remind_time.slice(0, 5),
+        date,
+        t.event_type || "reminder",
+        t.duration_minutes || 30,
+        title,
+        t.event_id
+      );
+      if (!res) return null;
+      fields.day = res.date || date;
+      fields.remind_date = res.date || date;
+      if (res.eventId) fields.event_id = res.eventId;
+    }
+
+    const { error } = await sb().from("todos").update(fields).eq("id", t.id);
+    if (error) {
+      toast(friendlyDbError(error.message, "ویرایش انجام نشد؛ دوباره تلاش کنید"));
+      return null;
+    }
+    toast("کار ویرایش شد ✓");
+    await load();
+    return { ok: true };
   }
 
   async function setReminder(
@@ -389,6 +481,6 @@ export function useTodos(start: string, end: string) {
     return null;
   }
 
-  return { todos, loading, add, toggle, remove, setReminder, reload: load, calendar };
+  return { todos, loading, add, toggle, remove, update, reorder, setReminder, reload: load, calendar };
 }
 export { toISO };

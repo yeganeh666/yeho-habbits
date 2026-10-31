@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { addDays, fa, fromISO, MONTHS, prettyDate, todayISO, WEEKDAYS_SHORT, weekStartISO } from "@/lib/jalali";
 import { todoDay, useTodos } from "@/lib/data";
@@ -27,9 +27,15 @@ export default function Todos() {
   const [remType, setRemType] = useState<"reminder" | "meeting">("reminder");
   const [remDuration, setRemDuration] = useState(30);
 
+  // ویرایش عنوان و تاریخ کار
+  const [editing, setEditing] = useState<Todo | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDate, setEditDate] = useState(today);
+  const [editBusy, setEditBusy] = useState(false);
+
   // وضعیت باز بودن تقویم ماهانه
   const [calendarOpen, setCalendarOpen] = useState(false);
-  const [calendarTarget, setCalendarTarget] = useState<"quick_add" | "reminder_modal">("reminder_modal");
+  const [calendarTarget, setCalendarTarget] = useState<"quick_add" | "reminder_modal" | "edit">("reminder_modal");
   const [directCalendarUrl, setDirectCalendarUrl] = useState<string | null>(null);
 
   const byDay = useMemo(() => {
@@ -38,7 +44,144 @@ export default function Todos() {
     return m;
   }, [t.todos]);
 
-  const list = byDay[day] ?? [];
+  // ---------- جابجایی کارها با نگه داشتن (الویت‌بندی) ----------
+  const [order, setOrder] = useState<string[] | null>(null); // ترتیب موقت هنگام کشیدن
+  const [dragId, setDragId] = useState<string | null>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const drag = useRef<{
+    id: string; startX: number; startY: number; lastY: number; grab: number;
+    active: boolean; timer: ReturnType<typeof setTimeout> | null; scroller: ReturnType<typeof setInterval> | null;
+    cleanup: () => void;
+  } | null>(null);
+  const orderRef = useRef<string[] | null>(null);
+  const dayListRef = useRef<Todo[]>([]);
+
+  const baseList = byDay[day] ?? [];
+  dayListRef.current = baseList;
+  const list = order
+    ? order.map((id) => baseList.find((x) => x.id === id)).filter((x): x is Todo => !!x)
+    : baseList;
+
+  const dragEl = () => listRef.current?.querySelector<HTMLElement>(`[data-todo-id="${drag.current?.id}"]`) ?? null;
+
+  function applyDragTransform() {
+    const d = drag.current, el = dragEl();
+    if (!d || !d.active || !el) return;
+    el.style.transform = "";
+    const natural = el.getBoundingClientRect().top;
+    el.style.transform = `translateY(${d.lastY - d.grab - natural}px) scale(1.03)`;
+  }
+
+  function checkSwap() {
+    const d = drag.current, ids = orderRef.current;
+    if (!d || !ids || !listRef.current) return;
+    const el = dragEl();
+    if (!el) return;
+    const h = el.getBoundingClientRect().height;
+    const center = d.lastY - d.grab + h / 2;
+    const others = ids.filter((id) => id !== d.id);
+    let idx = 0;
+    others.forEach((id) => {
+      const o = listRef.current!.querySelector<HTMLElement>(`[data-todo-id="${id}"]`);
+      if (!o) return;
+      const r = o.getBoundingClientRect();
+      if (r.top + r.height / 2 < center) idx++;
+    });
+    if (ids.indexOf(d.id) !== idx) {
+      const next = [...others];
+      next.splice(idx, 0, d.id);
+      orderRef.current = next;
+      setOrder(next);
+    }
+  }
+
+  // بعد از هر تغییر ترتیب، کارتِ در حال کشیدن را دوباره زیر انگشت قرار بده
+  useLayoutEffect(() => { applyDragTransform(); }, [order]);
+
+  // جلوگیری از اسکرول صفحه وقتی کارتی در حال جابجایی است
+  useEffect(() => {
+    const block = (e: TouchEvent) => { if (drag.current?.active && e.cancelable) e.preventDefault(); };
+    window.addEventListener("touchmove", block, { passive: false });
+    return () => window.removeEventListener("touchmove", block);
+  }, []);
+
+  function startPress(e: React.PointerEvent<HTMLLIElement>, id: string) {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    if ((e.target as HTMLElement).closest("button, a, input")) return;
+    if (drag.current) drag.current.cleanup();
+    const li = e.currentTarget;
+
+    const onMove = (ev: PointerEvent) => {
+      const d = drag.current;
+      if (!d) return;
+      d.lastY = ev.clientY;
+      if (!d.active) {
+        if (Math.hypot(ev.clientX - d.startX, ev.clientY - d.startY) > 8) d.cleanup();
+        return;
+      }
+      checkSwap();
+      applyDragTransform();
+    };
+    const finish = () => {
+      const d = drag.current;
+      if (!d) return;
+      const wasActive = d.active;
+      const ids = orderRef.current;
+      d.cleanup();
+      if (wasActive && ids) {
+        const byId = new Map(dayListRef.current.map((x) => [x.id, x]));
+        const ordered = ids.map((i) => byId.get(i)).filter((x): x is Todo => !!x);
+        if (ordered.some((x, i) => x.id !== dayListRef.current[i]?.id)) t.reorder(ordered);
+      }
+    };
+    const cleanup = () => {
+      const d = drag.current;
+      if (d?.timer) clearTimeout(d.timer);
+      if (d?.scroller) clearInterval(d.scroller);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      const el = listRef.current?.querySelector<HTMLElement>(`[data-todo-id="${id}"]`);
+      if (el) el.style.transform = "";
+      drag.current = null;
+      orderRef.current = null;
+      setOrder(null);
+      setDragId(null);
+    };
+
+    drag.current = {
+      id, startX: e.clientX, startY: e.clientY, lastY: e.clientY, grab: 0,
+      active: false, timer: null, scroller: null, cleanup,
+    };
+    drag.current.timer = setTimeout(() => {
+      const d = drag.current;
+      if (!d) return;
+      d.active = true;
+      d.grab = d.startY - li.getBoundingClientRect().top;
+      orderRef.current = dayListRef.current.map((x) => x.id);
+      setOrder(orderRef.current);
+      setDragId(id);
+      navigator.vibrate?.(15);
+      // اسکرول خودکار کنار لبه‌های صفحه
+      d.scroller = setInterval(() => {
+        const dd = drag.current;
+        if (!dd) return;
+        const edge = 90;
+        if (dd.lastY < edge) window.scrollBy(0, -12);
+        else if (dd.lastY > window.innerHeight - edge) window.scrollBy(0, 12);
+        else return;
+        checkSwap();
+        applyDragTransform();
+      }, 16);
+    }, 350);
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+  }
+
+  // پاکسازی در صورت خروج از صفحه
+  useEffect(() => () => { drag.current?.cleanup(); }, []);
   const done = list.filter((x) => x.done).length;
   const pct = (iso: string) => {
     const l = byDay[iso] ?? [];
@@ -74,7 +217,21 @@ export default function Todos() {
     setRemDuration(todo.duration_minutes || 30);
   }
 
-  const openCalendarFor = (target: "quick_add" | "reminder_modal") => {
+  function openEditModal(todo: Todo) {
+    setEditing(todo);
+    setEditTitle(todo.title);
+    setEditDate(todoDay(todo));
+  }
+
+  async function saveEdit() {
+    if (!editing || !editTitle.trim()) return;
+    setEditBusy(true);
+    const res = await t.update(editing, { title: editTitle, date: editDate });
+    setEditBusy(false);
+    if (res) setEditing(null);
+  }
+
+  const openCalendarFor = (target: "quick_add" | "reminder_modal" | "edit") => {
     setCalendarTarget(target);
     setCalendarOpen(true);
   };
@@ -101,11 +258,11 @@ export default function Todos() {
       {/* انتخاب هفته به‌صورت لمسی و موبایل‌فرست */}
       <div className="mb-5 flex items-center gap-1.5">
         <button
-          aria-label="هفته بعد"
+          aria-label="هفته قبل"
           className="grid h-11 w-9 shrink-0 place-items-center rounded-xl bg-surface text-xl font-bold text-mute shadow-card active:scale-95 transition-transform"
-          onClick={() => setDay(addDays(day, 7))}
+          onClick={() => setDay(addDays(day, -7))}
         >
-          ‹
+          ›
         </button>
         <div className="grid flex-1 grid-cols-7 gap-1">
           {week.map((iso, i) => {
@@ -134,11 +291,11 @@ export default function Todos() {
           })}
         </div>
         <button
-          aria-label="هفته قبل"
+          aria-label="هفته بعد"
           className="grid h-11 w-9 shrink-0 place-items-center rounded-xl bg-surface text-xl font-bold text-mute shadow-card active:scale-95 transition-transform"
-          onClick={() => setDay(addDays(day, -7))}
+          onClick={() => setDay(addDays(day, 7))}
         >
-          ›
+          ‹
         </button>
       </div>
 
@@ -256,12 +413,24 @@ export default function Todos() {
             برای این روز کاری ثبت نشده است. در کادر بالا اولین کار را اضافه کنید.
           </p>
         ) : (
-          <ul className="space-y-2.5">
+          <>
+          <ul ref={listRef} className="space-y-2.5">
             {list.map((x) => {
               const hasDiffDate = x.remind_date && x.remind_date !== x.day;
               const isMeeting = x.event_type === "meeting";
               return (
-                <li key={x.id} className="flex items-center gap-3 rounded-hero bg-surface p-3.5 shadow-card active:scale-[0.99] transition-transform">
+                <li
+                  key={x.id}
+                  data-todo-id={x.id}
+                  onPointerDown={(e) => startPress(e, x.id)}
+                  onContextMenu={(e) => { if (drag.current) e.preventDefault(); }}
+                  style={{ WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" } as React.CSSProperties}
+                  className={`relative flex items-center gap-3 rounded-hero bg-surface p-3.5 ${
+                    dragId === x.id
+                      ? "z-20 shadow-2xl ring-2 ring-brand/40 transition-none cursor-grabbing"
+                      : "shadow-card active:scale-[0.99] transition-transform"
+                  }`}
+                >
                   <Check
                     on={x.done}
                     size={34}
@@ -302,11 +471,18 @@ export default function Todos() {
                       "تقویم"
                     )}
                   </button>
+                  <button aria-label={`ویرایش ${x.title}`} className="px-1.5 py-1 text-mute opacity-60 hover:opacity-100 active:scale-90" onClick={() => openEditModal(x)}>✎</button>
                   <button aria-label={`حذف ${x.title}`} className="px-2 py-1 text-mute opacity-60 hover:opacity-100 active:scale-90" onClick={() => t.remove(x)}>✕</button>
                 </li>
               );
             })}
           </ul>
+          {list.length > 1 && (
+            <p className="mt-3 text-center text-[11px] text-mute">
+              برای تغییر الویت، روی یک کار نگه دارید و آن را بکشید.
+            </p>
+          )}
+          </>
         )}
       </section>
 
@@ -332,6 +508,49 @@ export default function Todos() {
           })}
         </div>
       </section>
+
+      {/* ویرایش عنوان و تاریخ کار */}
+      <Sheet open={!!editing} onClose={() => setEditing(null)} title="ویرایش کار">
+        <form
+          className="space-y-4"
+          onSubmit={(e) => { e.preventDefault(); saveEdit(); }}
+        >
+          <Field label="عنوان">
+            <input
+              className={inputCls}
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              aria-label="عنوان کار"
+              autoFocus
+            />
+          </Field>
+          <div>
+            <span className="block text-xs font-bold text-mute mb-2">تاریخ:</span>
+            <button
+              type="button"
+              onClick={() => openCalendarFor("edit")}
+              className="flex w-full items-center justify-between rounded-xl bg-surface p-3 text-sm font-extrabold text-brand shadow-sm border border-brand/20 active:scale-98 transition-all"
+            >
+              <span className="flex items-center gap-2">
+                <span className="text-lg">📅</span>
+                <span>{prettyDate(editDate)}</span>
+              </span>
+              <span className="rounded-lg bg-brand/10 px-2.5 py-1 text-xs text-brand">تغییر تاریخ ▾</span>
+            </button>
+            {editing?.remind_time && (
+              <p className="mt-2 text-[11px] text-mute">
+                این کار در تقویم گوگل هم ثبت شده است؛ عنوان و تاریخ رویداد هم به‌روز می‌شود.
+              </p>
+            )}
+          </div>
+          <div className="flex gap-3">
+            <button className={`${btnPrimary} flex-1 py-3.5`} disabled={!editTitle.trim() || editBusy}>
+              {editBusy ? "در حال ذخیره…" : "ذخیره تغییرات"}
+            </button>
+            <button type="button" className={btnGhost} onClick={() => setEditing(null)}>انصراف</button>
+          </div>
+        </form>
+      </Sheet>
 
       {/* مدال تنظیم تاریخ، ساعت، یادآور یا جلسه در تقویم گوگل */}
       <Sheet open={!!rem} onClose={() => setRem(null)} title="ثبت در تقویم گوگل">
@@ -514,10 +733,12 @@ export default function Todos() {
       <JalaliCalendarModal
         open={calendarOpen}
         onClose={() => setCalendarOpen(false)}
-        value={calendarTarget === "quick_add" ? addDate : remDate}
+        value={calendarTarget === "quick_add" ? addDate : calendarTarget === "edit" ? editDate : remDate}
         onChange={(newIso) => {
           if (calendarTarget === "quick_add") {
             setAddDate(newIso);
+          } else if (calendarTarget === "edit") {
+            setEditDate(newIso);
           } else {
             setRemDate(newIso);
           }

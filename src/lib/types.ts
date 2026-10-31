@@ -37,6 +37,8 @@ export type Todo = {
   event_id: string | null;
   event_type?: "reminder" | "meeting" | null;
   duration_minutes?: number | null;
+  /** ترتیب (الویت) کار در لیست روز؛ عدد کمتر یعنی بالاتر */
+  sort?: number | null;
 };
 
 export type Settings = {

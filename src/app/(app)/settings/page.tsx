@@ -1,14 +1,14 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { sb, migrateLocalDataToSupabase } from "@/lib/supabase-browser";
+import { sb, sessionUser, migrateLocalDataToSupabase } from "@/lib/supabase-browser";
 import { getClientSupabaseCredentials } from "@/lib/supabase-config";
 import { btnGhost, btnPrimary, CalendarBadge, Field, inputCls } from "@/components/ui";
 import { getLocalScriptUrl, setLocalScriptUrl, toast } from "@/lib/data";
 import { GOOGLE_APPS_SCRIPT_SOURCE } from "@/lib/apps-script";
 import type { Settings } from "@/lib/types";
 
-const SUPABASE_SCHEMA_SQL = `-- در Supabase > SQL Editor اجرا کنید:
+const SUPABASE_SCHEMA_SQL = `-- این کد را در بخش SQL Editor پایگاه داده اجرا کنید:
 create extension if not exists pgcrypto;
 
 create table if not exists habits (
@@ -64,9 +64,11 @@ create table if not exists todos (
   event_type text default 'reminder',
   duration_minutes int default 30,
   event_id text,
+  sort int not null default 0,
   created_at timestamptz not null default now()
 );
 
+alter table todos add column if not exists sort int not null default 0;
 alter table todos add column if not exists remind_date date;
 alter table todos add column if not exists event_type text default 'reminder';
 alter table todos add column if not exists duration_minutes int default 30;
@@ -115,7 +117,7 @@ export default function SettingsPage() {
   useEffect(() => {
     (async () => {
       const db = sb();
-      const { data: u } = await db.auth.getUser();
+      const u = await sessionUser();
       if (!u.user) {
         r.replace("/login");
         return;
@@ -166,14 +168,14 @@ export default function SettingsPage() {
     const { migratedHabits, migratedTodos } = await migrateLocalDataToSupabase(userId);
     setMigrating(false);
     setHasLegacyData(false);
-    toast(`انتقال موفق! ${migratedHabits} عادت و ${migratedTodos} کار به حساب Supabase منتقل شدند.`);
+    toast(`انتقال موفق! ${migratedHabits} عادت و ${migratedTodos} کار به حساب شما منتقل شدند.`);
   }
 
   async function saveCalendarSettings() {
     setBusy(true);
     const clean = scriptUrl.trim();
     setLocalScriptUrl(clean);
-    const { data: u } = await sb().auth.getUser();
+    const u = await sessionUser();
     if (!u.user) {
       r.replace("/login");
       return;
@@ -185,7 +187,7 @@ export default function SettingsPage() {
     };
     const { error } = await sb().from("user_settings").upsert(payload);
     setBusy(false);
-    toast(error ? "ذخیره نشد؛ مجدداً تلاش کنید" : "تنظیمات تقویم گوگل با موفقیت در Supabase ذخیره شد");
+    toast(error ? "ذخیره نشد؛ مجدداً تلاش کنید" : "تنظیمات تقویم گوگل با موفقیت ذخیره شد");
   }
 
   async function testCalendarScript() {
@@ -255,7 +257,7 @@ export default function SettingsPage() {
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <span className="h-2.5 w-2.5 rounded-full bg-mint animate-pulse" />
-            <h2 className="text-base font-extrabold text-ink">حساب کاربری و پایگاه داده Supabase</h2>
+            <h2 className="text-base font-extrabold text-ink">حساب کاربری و پایگاه داده</h2>
           </div>
           <span className="rounded-full bg-mint/15 px-2.5 py-1 text-[11px] font-bold text-mint">
             دیتابیس ابری
@@ -269,7 +271,7 @@ export default function SettingsPage() {
           </div>
           <div className="flex justify-between items-center">
             <span className="text-mute">سرور پایگاه داده:</span>
-            <span dir="ltr" className="font-mono text-[11px] text-brand">{supabaseHost || "Supabase Cloud"}</span>
+            <span dir="ltr" className="font-mono text-[11px] text-brand">{supabaseHost || "سرویس ابری"}</span>
           </div>
           <div className="flex justify-between items-center">
             <span className="text-mute">شناسه کاربری (UUID):</span>
@@ -288,7 +290,7 @@ export default function SettingsPage() {
               disabled={migrating}
               className="rounded-xl bg-brand px-3 py-2 text-white font-bold active:scale-95 transition-transform"
             >
-              {migrating ? "در حال انتقال…" : "انتقال داده‌های قبلی به حساب Supabase"}
+              {migrating ? "در حال انتقال…" : "انتقال داده‌های قبلی به حساب کاربری"}
             </button>
           </div>
         )}

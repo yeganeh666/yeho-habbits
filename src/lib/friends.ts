@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { sb } from "./supabase-browser";
+import { sb, sessionUser } from "./supabase-browser";
 import { monthLength, monthRange } from "./jalali";
 
 export type FriendRow = {
@@ -25,8 +25,8 @@ export function friendlyError(msg?: string) {
   if (m.includes("reverse_exists")) return "این دوست قبلاً برای تو درخواست فرستاده؛ از بخش «درخواست‌ها» بپذیرش";
   if (m.includes("duplicate") || m.includes("23505")) return "قبلاً برای این ایمیل درخواست فرستاده‌ای";
   if (m.includes("not_friends")) return "دوستی تأیید نشده است";
-  if (m.includes("friend_board") || m.includes("friendships")) return "جدول دوستان در دیتابیس ساخته نشده؛ فایل supabase/friends.sql را اجرا کن";
-  return m || "خطای ناشناخته";
+  if (m.includes("friend_board") || m.includes("friendships")) return "امکان دوستان هنوز فعال نشده است؛ لطفاً با پشتیبانی تماس بگیرید";
+  return /[\u0600-\u06FF]/.test(m) ? m : "مشکلی پیش آمد؛ دوباره تلاش کنید";
 }
 
 /* ---------- لیست دوستان و درخواست‌ها ---------- */
@@ -39,7 +39,7 @@ export function useFriends() {
   const load = useCallback(async () => {
     try {
       const db = sb();
-      const { data: u } = await db.auth.getUser();
+      const u = await sessionUser();
       if (!u?.user) { setLoading(false); return; }
       setMe({ id: u.user.id, email: (u.user.email || "").toLowerCase() });
       const { data, error } = await db.from("friendships").select("*").order("created_at", { ascending: false });

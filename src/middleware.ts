@@ -31,8 +31,10 @@ export async function middleware(req: NextRequest) {
       },
     });
 
-    const { data } = await supabase.auth.getUser();
-    const user = data?.user;
+    // getClaims توکن را (در صورت امکان) به‌صورت محلی اعتبارسنجی می‌کند و برخلاف getUser
+    // برای هر ناوبری یک درخواست شبکه به سرور احراز هویت نمی‌زند؛ توکن منقضی را هم تازه می‌کند.
+    const { data } = await supabase.auth.getClaims();
+    const user = data?.claims ?? null;
 
     // Unauthenticated user attempting to access private app pages
     if (!user && !isLogin && !isApi) {

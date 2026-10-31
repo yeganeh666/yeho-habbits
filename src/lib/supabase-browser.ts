@@ -52,6 +52,16 @@ export function sb(): ReturnType<typeof createBrowserClient> {
 }
 
 /**
+ * کاربر فعلی از نشست ذخیره‌شده در مرورگر (بدون رفت‌وبرگشت شبکه).
+ * auth.getUser() برای هر بار فراخوانی یک درخواست به سرور احراز هویت می‌زند و
+ * باعث کندی هر صفحه می‌شد؛ امنیت داده‌ها هم‌چنان با RLS در پایگاه داده تضمین است.
+ */
+export async function sessionUser() {
+  const { data } = await sb().auth.getSession();
+  return { user: data.session?.user ?? null };
+}
+
+/**
  * Migration helper: if user previously had mock items in localStorage from offline mode,
  * migrate them into their real Supabase account under user.id.
  */

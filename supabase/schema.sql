@@ -70,6 +70,7 @@ create table if not exists todos (
   event_type text default 'reminder',
   duration_minutes int default 30,
   event_id text,
+  sort int not null default 0,
   created_at timestamptz not null default now()
 );
 create index if not exists todos_user_day on todos(user_id, day);
@@ -79,6 +80,7 @@ alter table todos add column if not exists remind_date date;
 alter table todos add column if not exists event_type text default 'reminder';
 alter table todos add column if not exists duration_minutes int default 30;
 alter table todos add column if not exists event_id text;
+alter table todos add column if not exists sort int not null default 0;
 
 -- ۷. جدول تنظیمات کاربر و اتصال به تقویم گوگل (User Settings)
 create table if not exists user_settings (

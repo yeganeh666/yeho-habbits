@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { sb, migrateLocalDataToSupabase } from "@/lib/supabase-browser";
+import { sb, sessionUser, migrateLocalDataToSupabase } from "@/lib/supabase-browser";
 import { getClientSupabaseCredentials } from "@/lib/supabase-config";
 import { btnPrimary, Field, inputCls } from "@/components/ui";
 
@@ -22,8 +22,8 @@ export default function Login() {
     setIsConfigured(creds.isConfigured);
 
     if (creds.isConfigured) {
-      sb().auth.getUser().then(({ data }) => {
-        if (data?.user) {
+      sessionUser().then((u) => {
+        if (u.user) {
           r.replace("/");
         }
       });
@@ -50,7 +50,7 @@ export default function Login() {
     if (low.includes("failed to fetch") || low.includes("network")) {
       return "عدم برقراری ارتباط با پایگاه داده. لطفاً اتصال اینترنت را بررسی فرمایید.";
     }
-    return message;
+    return /[\u0600-\u06FF]/.test(message) ? message : "مشکلی پیش آمد؛ دوباره تلاش کنید.";
   }
 
   async function submit(e: React.FormEvent) {
@@ -144,7 +144,7 @@ export default function Login() {
         <div className="mb-4 rounded-2xl bg-amber/15 border border-amber/30 p-4 text-center text-xs">
           <p className="font-extrabold text-amber mb-1">⚠️ در انتظار تنظیم مشخصات پایگاه داده</p>
           <p className="text-mute leading-5">
-            کلیدهای اتصال Supabase باید در فایل تنظیمات <code className="bg-white/40 px-1 py-0.5 rounded font-mono">.env</code> قرار گیرند.
+            کلیدهای اتصال به پایگاه داده باید در فایل تنظیمات <code className="bg-white/40 px-1 py-0.5 rounded font-mono">.env</code> قرار گیرند.
           </p>
         </div>
       )}
@@ -272,7 +272,7 @@ export default function Login() {
       </section>
 
       <p className="mt-6 text-center text-[11px] text-mute leading-5">
-        اطلاعات هر کاربر به صورت مجزا و با قوانین امنیتی RLS در دیتابیس Supabase ذخیره می‌شود.
+        اطلاعات هر کاربر به صورت مجزا و با قوانین امنیتی RLS در پایگاه داده ذخیره می‌شود.
       </p>
     </main>
   );
