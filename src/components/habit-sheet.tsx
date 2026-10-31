@@ -3,25 +3,34 @@ import { useEffect, useState } from "react";
 import { btnGhost, btnPrimary, Field, inputCls, Sheet } from "./ui";
 import { getLocalScriptUrl, toast } from "@/lib/data";
 import { sb } from "@/lib/supabase-browser";
-import { fa } from "@/lib/jalali";
+import { todayISO } from "@/lib/jalali";
+import { dailyRecurrence, startOf, type Recurrence } from "@/lib/recurrence";
+import { RecurrenceEditor } from "./recurrence-editor";
 import type { Habit } from "@/lib/types";
 
 export const COLORS = ["#5B3DF5", "#26BCD0", "#AA3487", "#F5A028", "#2FA66A", "#E5484D"];
 
 const SUGGESTIONS = ["نوشیدن آب", "مطالعه", "ورزش", "مدیتیشن", "پیاده‌روی", "خواب منظم"];
 
-export function HabitSheet({ open, onClose, habit, defaultTarget, monthLen = 30, presetName = "", onSave, onArchive }:
-  { open: boolean; onClose: () => void; habit: Habit | null; defaultTarget: number; monthLen?: number; presetName?: string; onSave: (v: { name: string; target: number; color: string; isPrivate: boolean }) => Promise<void>; onArchive?: () => Promise<void> }) {
-  const [name, setName] = useState(""); const [target, setTarget] = useState(defaultTarget); const [color, setColor] = useState(COLORS[0]);
+export function HabitSheet({ open, onClose, habit, month, defaultStart, presetName = "", onSave, onArchive }:
+  { open: boolean; onClose: () => void; habit: Habit | null; month: { jy: number; jm: number }; /** شروع تکرار برای عادت‌های قدیمی بدون برنامه */ defaultStart?: string; presetName?: string; onSave: (v: { name: string; color: string; isPrivate: boolean; recurrence: Recurrence | null }) => Promise<void>; onArchive?: () => Promise<void> }) {
+  const [name, setName] = useState(""); const [color, setColor] = useState(COLORS[0]);
   const [time, setTime] = useState(""); const [busy, setBusy] = useState(false); const [priv, setPriv] = useState(false);
+  const [rec, setRec] = useState<Recurrence>(() => dailyRecurrence(todayISO()));
+  const [touched, setTouched] = useState(false);
+  // عادت قدیمی هنوز برنامهٔ تکرار ندارد
+  const legacy = !!habit && !habit.recurrence;
   useEffect(() => {
     if (!open) return;
-    setName(habit?.name.trim() ?? presetName); setTarget(defaultTarget); setColor(habit?.color ?? COLORS[0]); setTime(habit?.reminder_time?.slice(0, 5) ?? ""); setPriv(!!habit?.is_private);
-  }, [open, habit, defaultTarget, presetName]);
+    setName(habit?.name.trim() ?? presetName); setColor(habit?.color ?? COLORS[0]); setTime(habit?.reminder_time?.slice(0, 5) ?? ""); setPriv(!!habit?.is_private);
+    setRec(habit?.recurrence ?? dailyRecurrence(defaultStart ?? (habit ? startOf(habit) : null) ?? todayISO())); setTouched(false);
+  }, [open, habit, defaultStart, presetName]);
 
   async function save() {
     if (!name.trim()) return;
-    setBusy(true); await onSave({ name: name.trim(), target, color, isPrivate: priv });
+    setBusy(true);
+    // عادت قدیمی تا وقتی کاربر تکرار را انتخاب نکرده همان‌طور می‌ماند
+    await onSave({ name: name.trim(), color, isPrivate: priv, recurrence: !legacy || touched ? rec : null });
     if (habit && time !== (habit.reminder_time?.slice(0, 5) ?? "")) {
       const scriptUrl = getLocalScriptUrl();
       const r = await fetch("/api/calendar", {
@@ -58,18 +67,10 @@ export function HabitSheet({ open, onClose, habit, defaultTarget, monthLen = 30,
           ))}
         </div>
       )}
-      <Field label="هدف این ماه (چند روز؟)">
-        <div className="flex items-center gap-3 rounded-2xl border border-line bg-bg p-1.5">
-          <button type="button" aria-label="کمتر" onClick={() => setTarget((t) => Math.max(1, (t || 1) - 1))} className="grid h-11 w-11 place-items-center rounded-xl bg-surface text-xl font-bold shadow-card active:scale-95">−</button>
-          <div className="flex-1 text-center"><span className="text-2xl font-extrabold">{fa(target || 1)}</span><span className="ms-1.5 text-sm font-semibold text-mute">روز</span></div>
-          <button type="button" aria-label="بیشتر" onClick={() => setTarget((t) => Math.min(monthLen, (t || 0) + 1))} className="grid h-11 w-11 place-items-center rounded-xl bg-surface text-xl font-bold shadow-card active:scale-95">+</button>
-        </div>
-        <div className="mt-2.5 flex gap-2">
-          {Array.from(new Set([monthLen, 25, 20, 15, 10])).filter((v) => v <= monthLen).map((v) => (
-            <button key={v} type="button" onClick={() => setTarget(v)} className={`flex-1 rounded-xl py-2 text-xs font-bold transition-colors ${target === v ? "bg-brand text-white" : "bg-soft text-brand"}`}>{v === monthLen ? "هر روز" : fa(v)}</button>
-          ))}
-        </div>
-      </Field>
+      {legacy && !touched && (
+        <p className="mb-4 rounded-2xl bg-amber/15 p-3.5 text-sm font-semibold leading-relaxed">برای این عادت هنوز روزهای انجام مشخص نشده (فعلاً «هر روز» حساب می‌شود). تکرار را انتخاب کن تا برنامهٔ هر روز و رکورد پیاپی دقیق شود.</p>
+      )}
+      <RecurrenceEditor value={rec} onChange={(r) => { setRec(r); setTouched(true); }} month={month} />
       <Field label="رنگ">
         <div className="flex justify-between">{COLORS.map((c) => (
           <button key={c} type="button" onClick={() => setColor(c)} aria-label={`رنگ ${c}`} aria-pressed={color === c}

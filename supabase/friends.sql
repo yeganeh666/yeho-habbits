@@ -95,7 +95,7 @@ begin
 
   return jsonb_build_object(
     'habits', coalesce((
-      select jsonb_agg(jsonb_build_object('id', h.id, 'name', h.name, 'color', h.color, 'monthly_target', h.monthly_target) order by h.sort, h.created_at)
+      select jsonb_agg(jsonb_build_object('id', h.id, 'name', h.name, 'color', h.color, 'monthly_target', h.monthly_target, 'recurrence', h.recurrence, 'created_at', h.created_at) order by h.sort, h.created_at)
       from habits h where h.user_id = friend and not h.archived and not h.is_private), '[]'::jsonb),
     'logs', coalesce((
       select jsonb_agg(jsonb_build_object('habit_id', l.habit_id, 'day', l.day))

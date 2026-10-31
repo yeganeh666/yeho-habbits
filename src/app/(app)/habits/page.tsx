@@ -5,6 +5,7 @@ import { addDays, fa, fromISO, monthLength, MONTHS, shiftMonth, toISO, todayISO,
 import { useMonth } from "@/lib/data";
 import { Bar, Check, CalendarBadge, Donut, pctText, Sheet } from "@/components/ui";
 import { HabitSheet } from "@/components/habit-sheet";
+import { dayStreaks, describeRecurrence, habitStreak, startOf } from "@/lib/recurrence";
 import type { Habit } from "@/lib/types";
 
 type M = ReturnType<typeof useMonth>;
@@ -37,10 +38,18 @@ export default function HabitsMonth() {
   const totalDone = habits.reduce((s, h) => s + m.countOf(h.id), 0);
   const totalTarget = habits.reduce((s, h) => s + m.targetOf(h), 0);
   const pct = totalTarget ? totalDone / totalTarget : 0;
-  const todayDone = isCurrent ? active.filter((h) => m.isDone(h.id, today)).length : 0;
-  const upTo = isCurrent ? now.jd : ym.jy * 12 + ym.jm < now.jy * 12 + now.jm ? len : 0;
-
-  const streakOf = (h: Habit) => { let s = 0; for (let d = upTo; d >= 1; d--) { if (m.isDone(h.id, iso(d))) s++; else if (d !== upTo) break; } return s; };
+  const todayList = isCurrent ? m.habitsOn(today) : [];
+  const todayDone = todayList.filter((h) => m.isDone(h.id, today)).length;
+  // آخرین روزی که رکورد تا آن حساب می‌شود: امروز، پایان ماه‌های گذشته، یا هیچ (ماه آینده)
+  const ref = isCurrent ? today : ym.jy * 12 + ym.jm < now.jy * 12 + now.jm ? iso(len) : null;
+  const streakOf = (h: Habit) => (ref ? habitStreak(h, (d) => m.isDone(h.id, d), ref) : 0);
+  const dayStreak = ref && active.length ? dayStreaks(active, (h, d) => m.isDone(h.id, d), ref).cur : 0;
+  // شروع تکرار برای عادت‌های قدیمی: از روز ساخته‌شدن یا اولین تیک ثبت‌شده، هرکدام زودتر
+  const legacyStart = (h: Habit) => {
+    const keys = [...Object.keys(m.logs)].filter((k) => k.startsWith(`${h.id}|`)).map((k) => k.slice(h.id.length + 1)).sort();
+    const first = keys[0], created = startOf(h);
+    return first && created ? (first < created ? first : created) : first ?? created ?? undefined;
+  };
   const openNew = (name = "") => { setEdit(null); setPreset(name); setOpen(true); };
   const openEdit = (h: Habit) => { setEdit(h); setPreset(""); setOpen(true); };
   const detailHabit = habits.find((h) => h.id === detail) ?? null;
@@ -68,7 +77,8 @@ export default function HabitsMonth() {
             <p className="text-sm font-semibold text-white/75">پیشرفت ماه</p>
             <p className="text-lg font-extrabold leading-snug">{fa(totalDone)} از {fa(totalTarget)} تیک هدف</p>
             <div className="mt-2.5 flex flex-wrap gap-2 text-xs font-semibold">
-              {isCurrent && active.length > 0 && <span className="rounded-full bg-white/15 px-2.5 py-1">امروز: {fa(todayDone)}/{fa(active.length)}</span>}
+              {isCurrent && todayList.length > 0 && <span className="rounded-full bg-white/15 px-2.5 py-1">امروز: {fa(todayDone)}/{fa(todayList.length)}</span>}
+              {dayStreak > 0 && <span className="rounded-full bg-white/15 px-2.5 py-1">🔥 {fa(dayStreak)} روز کامل پیاپی</span>}
               {isCurrent && <span className="rounded-full bg-white/15 px-2.5 py-1">{fa(len - now.jd)} روز تا پایان ماه</span>}
             </div>
           </div>
@@ -102,8 +112,11 @@ export default function HabitsMonth() {
       <DetailSheet h={detailHabit} onClose={() => setDetail(null)} m={m} ym={ym} len={len} iso={iso} today={today} streak={detailHabit ? streakOf(detailHabit) : 0}
         onEdit={() => { if (detailHabit) { const h = detailHabit; setDetail(null); openEdit(h); } }} />
 
-      <HabitSheet open={open} onClose={() => setOpen(false)} habit={edit} monthLen={len} presetName={preset} defaultTarget={edit ? m.targetOf(edit) : len}
-        onSave={async (v) => { edit ? await m.updateHabit(edit.id, { name: v.name, color: v.color, ...(v.isPrivate !== !!edit.is_private ? { is_private: v.isPrivate } : {}) }, v.target) : await m.addHabit({ name: v.name, target: v.target, color: v.color, is_private: v.isPrivate }); }}
+      <HabitSheet open={open} onClose={() => setOpen(false)} habit={edit} month={ym} presetName={preset} defaultStart={edit && !edit.recurrence ? legacyStart(edit) : undefined}
+        onSave={async (v) => {
+          if (edit) await m.updateHabit(edit.id, { name: v.name, color: v.color, ...(v.recurrence ? { recurrence: v.recurrence } : {}), ...(v.isPrivate !== !!edit.is_private ? { is_private: v.isPrivate } : {}) });
+          else if (v.recurrence) await m.addHabit({ name: v.name, color: v.color, recurrence: v.recurrence, is_private: v.isPrivate });
+        }}
         onArchive={edit ? async () => { await m.updateHabit(edit.id, { archived: true }); } : undefined} />
     </main>
   );
@@ -139,7 +152,8 @@ function HabitCard({ h, m, ym, len, isCurrent, streak, onOpen, onEdit }: { h: Ha
             <span className="block truncate text-base font-extrabold">{h.name.trim()}</span>
             <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs font-semibold text-mute">
               <span>{fa(c)} از {fa(tg)} روز</span>
-              {streak > 1 && <span className="rounded-full px-2 py-0.5 text-[11px] font-bold" style={{ background: `${h.color}22`, color: h.color }}>🔥 {fa(streak)} روز پیاپی</span>}
+              <span className="font-medium opacity-80">{h.recurrence ? describeRecurrence(h.recurrence) : "روزها مشخص نیست"}</span>
+              {streak > 1 && <span className="rounded-full px-2 py-0.5 text-[11px] font-bold" style={{ background: `${h.color}22`, color: h.color }}>🔥 {fa(streak)} نوبت پیاپی</span>}
             </span>
           </span>
         </button>
@@ -150,9 +164,10 @@ function HabitCard({ h, m, ym, len, isCurrent, streak, onOpen, onEdit }: { h: Ha
       <div className="mt-3.5 grid grid-cols-7 gap-1.5">
         {week.map((d, i) => {
           const q = fromISO(d), inMonth = q.jy === ym.jy && q.jm === ym.jm, on = inMonth && m.isDone(h.id, d), isToday = d === today;
+          const due = m.isDueOn(h, d);
           return (
-            <button key={d} disabled={!inMonth} onClick={() => m.toggle(h, d)} aria-pressed={on} aria-label={`${h.name.trim()} ${fa(q.jd)} ${MONTHS[q.jm - 1]}`}
-              className={`flex flex-col items-center gap-1 rounded-2xl py-2 transition-all active:scale-90 disabled:opacity-30 ${on ? "" : "bg-bg"}`}
+            <button key={d} disabled={!inMonth || (!due && !on)} onClick={() => m.toggle(h, d)} aria-pressed={on} aria-label={`${h.name.trim()} ${fa(q.jd)} ${MONTHS[q.jm - 1]}${due ? "" : " (نوبت ندارد)"}`}
+              className={`flex flex-col items-center gap-1 rounded-2xl py-2 transition-all active:scale-90 disabled:opacity-30 ${on ? "" : due ? "bg-bg" : "border border-dashed border-line"}`}
               style={{ background: on ? h.color : undefined, boxShadow: isToday && !on ? `inset 0 0 0 2px ${h.color}` : undefined }}>
               <span className={`text-[10px] font-semibold ${on ? "text-white/80" : "text-mute"}`}>{WEEKDAYS_SHORT[i]}</span>
               {on ? <Tick size={18} /> : <span className="text-sm font-extrabold leading-[18px]">{fa(q.jd)}</span>}
@@ -172,19 +187,20 @@ function DetailSheet({ h, onClose, m, ym, len, iso, today, streak, onEdit }: { h
   return (
     <Sheet open onClose={onClose} title={h.name.trim()}>
       <div className="mb-5 grid grid-cols-3 gap-2.5 text-center">
-        {[[fa(c), "انجام‌شده"], [pctText(tg ? c / tg : 0), "از هدف"], [fa(streak), "روز پیاپی"]].map(([v, l]) => (
+        {[[fa(c), "انجام‌شده"], [pctText(tg ? c / tg : 0), "از هدف"], [fa(streak), "نوبت پیاپی"]].map(([v, l]) => (
           <div key={l} className="rounded-2xl bg-bg py-3"><div className="text-xl font-extrabold" style={{ color: h.color }}>{v}</div><div className="text-[11px] font-semibold text-mute">{l}</div></div>
         ))}
       </div>
-      <p className="mb-2 text-sm font-bold text-mute">{MONTHS[ym.jm - 1]} {fa(ym.jy)} · روی هر روز بزن</p>
+      <p className="mb-1 text-sm font-bold text-mute">{MONTHS[ym.jm - 1]} {fa(ym.jy)} · روی هر روز بزن</p>
+      <p className="mb-2 text-xs font-semibold text-mute">{h.recurrence ? describeRecurrence(h.recurrence) : "روزها مشخص نیست"} · روزهای خط‌چین نوبت ندارند</p>
       <div className="mb-1.5 grid grid-cols-7 gap-1.5 text-center">{WEEKDAYS_SHORT.map((w) => <span key={w} className="text-[11px] font-semibold text-mute">{w}</span>)}</div>
       <div className="grid grid-cols-7 gap-1.5">
         {Array.from({ length: offset }, (_, i) => <span key={`o${i}`} />)}
         {Array.from({ length: len }, (_, i) => i + 1).map((d) => {
-          const on = m.isDone(h.id, iso(d)), isToday = iso(d) === today;
+          const on = m.isDone(h.id, iso(d)), isToday = iso(d) === today, due = m.isDueOn(h, iso(d));
           return (
-            <button key={d} onClick={() => m.toggle(h, iso(d))} aria-pressed={on} aria-label={`روز ${fa(d)}`}
-              className={`grid aspect-square place-items-center rounded-xl text-sm font-bold transition-all active:scale-90 ${on ? "text-white" : "bg-bg"}`}
+            <button key={d} disabled={!due && !on} onClick={() => m.toggle(h, iso(d))} aria-pressed={on} aria-label={`روز ${fa(d)}${due ? "" : " (نوبت ندارد)"}`}
+              className={`grid aspect-square place-items-center rounded-xl text-sm font-bold transition-all active:scale-90 ${on ? "text-white" : due ? "bg-bg" : "border border-dashed border-line text-mute/50"}`}
               style={{ background: on ? h.color : undefined, boxShadow: isToday && !on ? `inset 0 0 0 2px ${h.color}` : undefined }}>
               {on ? <Tick size={16} /> : fa(d)}
             </button>
@@ -202,7 +218,7 @@ function DetailSheet({ h, onClose, m, ym, len, iso, today, streak, onEdit }: { h
 /* ---------- نمای جدولی (مثل شیت) ---------- */
 function TableView({ m, ym, len, iso, today, active, onEdit }: { m: M; ym: { jy: number; jm: number }; len: number; iso: (d: number) => string; today: string; active: Habit[]; onEdit: (h: Habit) => void }) {
   const days = Array.from({ length: len }, (_, i) => i + 1);
-  const dayDone = (d: number) => active.filter((h) => m.isDone(h.id, iso(d))).length;
+  const dayPct = (d: number) => { const list = m.habitsOn(iso(d)); return list.length ? list.filter((h) => m.isDone(h.id, iso(d))).length / list.length : 0; };
   return (
     <section aria-label="جدول عادت‌های ماه" className="overflow-hidden rounded-hero bg-surface shadow-card">
       <p className="px-4 pt-3 text-xs font-semibold text-mute">برای دیدن همهٔ روزها به کنار بکش ›</p>
@@ -234,10 +250,10 @@ function TableView({ m, ym, len, iso, today, active, onEdit }: { m: M; ym: { jy:
                   </button>
                 </th>
                 {days.map((d) => {
-                  const on = m.isDone(h.id, iso(d));
+                  const on = m.isDone(h.id, iso(d)), due = m.isDueOn(h, iso(d));
                   return (
                     <td key={d} className={`p-0.5 ${d % 7 === 1 && d > 1 ? "ps-3" : ""}`}>
-                      <button aria-label={`${h.name.trim()} روز ${fa(d)}`} aria-pressed={on} onClick={() => m.toggle(h, iso(d))} className="mx-auto grid h-8 w-8 place-items-center rounded-[10px] transition-colors" style={{ background: on ? h.color : "rgb(var(--soft))" }}>{on && <Tick />}</button>
+                      <button disabled={!due && !on} aria-label={`${h.name.trim()} روز ${fa(d)}${due ? "" : " (نوبت ندارد)"}`} aria-pressed={on} onClick={() => m.toggle(h, iso(d))} className={`mx-auto grid h-8 w-8 place-items-center rounded-[10px] transition-colors ${!due && !on ? "border border-dashed border-line" : ""}`} style={{ background: on ? h.color : due ? "rgb(var(--soft))" : "transparent" }}>{on && <Tick />}</button>
                     </td>
                   );
                 })}
@@ -246,7 +262,7 @@ function TableView({ m, ym, len, iso, today, active, onEdit }: { m: M; ym: { jy:
             <tr>
               <th scope="row" className="sticky start-0 z-10 bg-surface p-3 text-start text-sm font-bold text-mute">پیشرفت روز</th>
               {days.map((d) => {
-                const p = active.length ? dayDone(d) / active.length : 0;
+                const p = dayPct(d);
                 return <td key={d} className={`px-0.5 pb-3 pt-2 align-bottom ${d % 7 === 1 && d > 1 ? "ps-3" : ""}`}><div title={pctText(p)} className="mx-auto flex h-14 w-8 items-end overflow-hidden rounded-lg bg-soft"><div className="w-full rounded-lg bg-mint transition-[height]" style={{ height: `${p * 100}%` }} /></div></td>;
               })}
             </tr>

@@ -21,6 +21,10 @@ create table if not exists habits (
   created_at timestamptz not null default now()
 );
 
+-- برنامهٔ تکرار عادت (مثل تکرار سفارشی تقویم گوگل): {unit, interval, days, start, end}
+-- برای عادت‌های قدیمی مقدارش null است و «هر روز» حساب می‌شوند
+alter table habits add column if not exists recurrence jsonb;
+
 -- ۳. جدول اهداف عددی هر ماه برای هر عادت (Habit Targets)
 create table if not exists habit_targets (
   habit_id uuid references habits(id) on delete cascade,

@@ -37,7 +37,7 @@ export default function FriendBoardPage() {
 
   const friendRows: TRow[] = fb.habits.map((h) => ({ id: h.id, name: h.name, color: h.color, count: fb.countOf(h.id), target: fb.targetOf(h), isDone: (d) => fb.isDone(h.id, d) }));
   const myRows: TRow[] = myActive.map((h) => ({ id: h.id, name: h.name, color: h.color, count: mine.countOf(h.id), target: mine.targetOf(h), isDone: (d) => mine.isDone(h.id, d) }));
-  const dayPct = (d: number) => (fb.habits.length ? fb.habits.filter((h) => fb.isDone(h.id, iso(d))).length / fb.habits.length : 0);
+  const dayPct = (d: number) => { const list = fb.habitsOn(iso(d)); return list.length ? list.filter((h) => fb.isDone(h.id, iso(d))).length / list.length : 0; };
 
   if (!f.loading && !friend) {
     return (

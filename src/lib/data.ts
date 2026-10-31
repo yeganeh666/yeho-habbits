@@ -1,7 +1,8 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { sb, sessionUser } from "./supabase-browser";
-import { monthLength, monthRange, prettyDate, toISO } from "./jalali";
+import { addDays, monthLength, monthRange, prettyDate, toISO } from "./jalali";
+import { dueCount, isDue, type Recurrence } from "./recurrence";
 import type { Goal, Habit, Todo } from "./types";
 
 export function toast(msg: string) {
@@ -25,8 +26,33 @@ export function friendlyDbError(msg?: string | null, fallback = "مشکلی پی
     return "اجازهٔ انجام این کار را ندارید";
   }
   if (low.includes("duplicate") || low.includes("23505")) return "این مورد قبلاً ثبت شده است";
+  if (low.includes("recurrence")) return "برای ذخیرهٔ تکرار، ابتدا کد SQL جدید را در Supabase اجرا کنید (ستون recurrence)";
   return fallback;
 }
+
+/** همهٔ تیک‌های انجام‌شده در یک بازه؛ صفحه‌به‌صفحه می‌خواند چون هر درخواست حداکثر ۱۰۰۰ ردیف برمی‌گرداند */
+export async function fetchDoneLogs(start: string, end: string): Promise<{ habit_id: string; day: string }[]> {
+  const out: { habit_id: string; day: string }[] = [];
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await sb()
+      .from("habit_logs")
+      .select("habit_id,day")
+      .eq("done", true)
+      .gte("day", start)
+      .lte("day", end)
+      .order("day")
+      .order("habit_id")
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    out.push(...((data ?? []) as { habit_id: string; day: string }[]));
+    if (!data || data.length < PAGE) break;
+  }
+  return out;
+}
+
+/** چند روز قبل از ماه برای محاسبهٔ رکورد پیاپی خوانده می‌شود */
+const HISTORY_DAYS = 400;
 
 export function getLocalScriptUrl(): string {
   if (typeof window === "undefined") return "";
@@ -60,8 +86,13 @@ export function useMonth(jy: number, jm: number) {
   const [targets, setTargets] = useState<Record<string, number>>({});
   const [goals, setGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
+  /** تیک‌های انجام‌شدهٔ روزهای قبل از این ماه (فقط برای رکورد پیاپی) */
+  const [past, setPast] = useState<Record<string, boolean>>({});
+  const pastCache = useRef<{ key: string; data: Record<string, boolean> } | null>(null);
+  const reqId = useRef(0);
 
   const load = useCallback(async () => {
+    const my = ++reqId.current;
     try {
       const db = sb();
       const u = await sessionUser();
@@ -92,6 +123,23 @@ export function useMonth(jy: number, jm: number) {
       setLogs(logMap);
       setTargets(Object.fromEntries((t.data ?? []).map((x: any) => [x.habit_id, x.target])));
       setGoals((g.data ?? []) as Goal[]);
+      setLoading(false);
+
+      // سابقهٔ ماه‌های قبل برای رکورد پیاپی؛ بعد از نمایش ماه و بدون معطل کردن صفحه
+      const pastKey = start;
+      if (pastCache.current?.key === pastKey) {
+        setPast(pastCache.current.data);
+      } else {
+        try {
+          const rows = await fetchDoneLogs(addDays(start, -HISTORY_DAYS), addDays(start, -1));
+          const map: Record<string, boolean> = {};
+          rows.forEach((x) => { map[`${x.habit_id}|${x.day}`] = true; });
+          pastCache.current = { key: pastKey, data: map };
+          if (my === reqId.current) setPast(map);
+        } catch (err) {
+          console.error("Error loading habit history:", err);
+        }
+      }
     } catch (err: any) {
       console.error("Error loading month data:", err);
     } finally {
@@ -104,9 +152,23 @@ export function useMonth(jy: number, jm: number) {
     load();
   }, [load]);
 
-  const targetOf = (h: Habit) => targets[h.id] ?? h.monthly_target ?? monthLength(jy, jm);
-  const isDone = (hid: string, day: string) => !!logs[`${hid}|${day}`];
-  const countOf = (hid: string) => Object.keys(logs).filter((k) => k.startsWith(hid)).length;
+  /** هدف ماه: برای عادت دارای تکرار = تعداد نوبت‌های همین ماه؛ برای عادت قدیمی = هدف دستی */
+  const targetOf = (h: Habit) => (h.recurrence ? dueCount(h, jy, jm) : targets[h.id] ?? h.monthly_target ?? monthLength(jy, jm));
+  /** آیا این عادت در این روز نوبت دارد؟ */
+  const isDueOn = (h: Habit, day: string) => isDue(h, day);
+  const monthStart = monthRange(jy, jm).start;
+  // سابقهٔ قبلی فقط برای روزهای قبل از همین ماه معتبر است (جلوگیری از داده‌ی کهنه هنگام جابه‌جایی ماه)
+  const isDone = (hid: string, day: string) => !!logs[`${hid}|${day}`] || (day < monthStart && !!past[`${hid}|${day}`]);
+  /** تیک‌های این ماه؛ برای عادت دارای تکرار فقط روزهای نوبت شمرده می‌شوند تا از هدف بیشتر نشود */
+  const countOf = (hid: string) => {
+    const h = habits.find((x) => x.id === hid);
+    const prefix = `${hid}|`;
+    let c = 0;
+    for (const k of Object.keys(logs)) if (k.startsWith(prefix) && (!h?.recurrence || isDue(h, k.slice(prefix.length)))) c++;
+    return c;
+  };
+  /** عادت‌های فعالِ یک روز: آن‌هایی که نوبت دارند یا در آن روز تیک خورده‌اند */
+  const habitsOn = (day: string) => habits.filter((h) => !h.archived && (isDue(h, day) || isDone(h.id, day)));
 
   async function toggle(h: Habit, day: string) {
     const key = `${h.id}|${day}`, next = !logs[key];
@@ -137,7 +199,7 @@ export function useMonth(jy: number, jm: number) {
     }
   }
 
-  async function addHabit(v: { name: string; target: number | null; color: string; is_private?: boolean }) {
+  async function addHabit(v: { name: string; color: string; recurrence: Recurrence; is_private?: boolean }) {
     const u = await sessionUser();
     if (!u?.user) {
       return toast("لطفاً ابتدا وارد حساب کاربری شوید");
@@ -146,7 +208,7 @@ export function useMonth(jy: number, jm: number) {
     const { data, error } = await sb().from("habits").insert({
       user_id: u.user.id,
       name: v.name,
-      monthly_target: v.target,
+      recurrence: v.recurrence,
       color: v.color,
       ...(v.is_private ? { is_private: true } : {}),
       sort: habits.length,
@@ -156,20 +218,14 @@ export function useMonth(jy: number, jm: number) {
       return toast(friendlyDbError(error?.message, "عادت ذخیره نشد؛ دوباره تلاش کنید"));
     }
 
-    if (v.target) {
-      await sb().from("habit_targets").upsert({ habit_id: data.id, jy, jm, target: v.target });
-    }
     toast("عادت جدید ثبت شد ✓");
     await load();
   }
 
-  async function updateHabit(id: string, patch: Partial<Habit>, target?: number | null) {
+  async function updateHabit(id: string, patch: Partial<Habit>) {
     const { error } = await sb().from("habits").update(patch).eq("id", id);
     if (error) {
       toast(friendlyDbError(error.message, "ویرایش انجام نشد؛ دوباره تلاش کنید"));
-    }
-    if (target) {
-      await sb().from("habit_targets").upsert({ habit_id: id, jy, jm, target });
     }
     await load();
   }
@@ -206,8 +262,10 @@ export function useMonth(jy: number, jm: number) {
     goals,
     loading,
     targetOf,
+    isDueOn,
     isDone,
     countOf,
+    habitsOn,
     toggle,
     addHabit,
     updateHabit,

@@ -1,3 +1,5 @@
+import type { Recurrence } from "./recurrence";
+
 export type Habit = {
   id: string;
   name: string;
@@ -8,6 +10,9 @@ export type Habit = {
   is_private?: boolean;
   reminder_time: string | null;
   reminder_event_id: string | null;
+  /** برنامهٔ تکرار؛ null یعنی هر روز و هدف ماهانهٔ دستی (عادت‌های قدیمی) */
+  recurrence?: Recurrence | null;
+  created_at?: string;
 };
 
 export type Log = {

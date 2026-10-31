@@ -19,6 +19,8 @@ export function fromISO(iso: string): JDate {
   return { jy: j.jy, jm: j.jm, jd: j.jd };
 }
 export const todayISO = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tehran" }).format(new Date());
+/** تاریخ (ISO) یک زمان‌مهر به وقت تهران */
+export const isoInTehran = (ts: string | Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tehran" }).format(new Date(ts));
 export const monthLength = (jy: number, jm: number) => jalaali.jalaaliMonthLength(jy, jm);
 
 /** شنبه = ۰ */

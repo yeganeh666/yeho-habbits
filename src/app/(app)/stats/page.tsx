@@ -2,7 +2,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { addDays, fa, fromISO, monthLength, MONTHS, shiftMonth, toISO, todayISO, WEEKDAYS, WEEKDAYS_SHORT, weekdayIndex } from "@/lib/jalali";
-import { useMonth } from "@/lib/data";
+import { fetchDoneLogs, useMonth } from "@/lib/data";
+import { dayStreaks, isDue } from "@/lib/recurrence";
 import { sb } from "@/lib/supabase-browser";
 import { CalendarBadge, Donut, pctText } from "@/components/ui";
 import { AreaChart, Gauge, Heatmap, MonthBars, WeekdayBars } from "@/components/charts";
@@ -25,18 +26,19 @@ export default function Stats() {
   const m = useMonth(now.jy, now.jm);
   const [hist, setHist] = useState<{ jy: number; jm: number; n: number }[]>([]);
   const [todo30, setTodo30] = useState({ done: 0, all: 0 });
-  const [recent, setRecent] = useState<Record<string, number>>({});
-  const active = m.habits.filter((h) => !h.archived);
+  // تیک‌های انجام‌شدهٔ ۶ ماه اخیر: "habitId|day"
+  const [doneSet, setDoneSet] = useState<Set<string>>(new Set());
+  const active = useMemo(() => m.habits.filter((h) => !h.archived), [m.habits]);
 
   useEffect(() => {
     (async () => {
       const first = shiftMonth(now.jy, now.jm, -5);
       const start = toISO({ ...first, jd: 1 });
-      const { data } = await sb().from("habit_logs").select("day").eq("done", true).gte("day", start);
-      const cnt: Record<string, number> = {}; const perDay: Record<string, number> = {};
-      (data ?? []).forEach((x: any) => { const q = fromISO(x.day); const k = `${q.jy}-${q.jm}`; cnt[k] = (cnt[k] ?? 0) + 1; perDay[x.day] = (perDay[x.day] ?? 0) + 1; });
+      const rows = await fetchDoneLogs(start, todayISO()).catch(() => []);
+      const cnt: Record<string, number> = {};
+      rows.forEach((x) => { const q = fromISO(x.day); const k = `${q.jy}-${q.jm}`; cnt[k] = (cnt[k] ?? 0) + 1; });
       setHist(Array.from({ length: 6 }, (_, i) => { const s = shiftMonth(first.jy, first.jm, i); return { ...s, n: cnt[`${s.jy}-${s.jm}`] ?? 0 }; }));
-      setRecent(perDay);
+      setDoneSet(new Set(rows.map((x) => `${x.habit_id}|${x.day}`)));
       const t = await sb().from("todos").select("done").gte("day", addDays(todayISO(), -29)).lte("day", todayISO());
       setTodo30({ done: (t.data ?? []).filter((x: any) => x.done).length, all: (t.data ?? []).length });
     })();
@@ -47,23 +49,25 @@ export default function Stats() {
   const pct = target ? total / target : 0;
   const len = monthLength(now.jy, now.jm);
   const iso = (d: number) => toISO({ ...now, jd: d });
-  const dayPct = (d: number) => (active.length ? active.filter((h) => m.isDone(h.id, iso(d))).length / active.length : 0);
+  /** درصد عادت‌های انجام‌شدهٔ یک روز؛ null یعنی آن روز هیچ عادتی نوبت نداشته */
+  const dayPct = (d: number) => { const list = m.habitsOn(iso(d)); return list.length ? list.filter((h) => m.isDone(h.id, iso(d))).length / list.length : null; };
   const days = Array.from({ length: len }, (_, i) => i + 1);
 
-  const streak = useMemo(() => {
-    if (!active.length) return { cur: 0, best: 0 };
-    let cur = 0, best = 0;
-    for (let i = 89; i >= 0; i--) { const d = addDays(today, -i); if ((recent[d] ?? 0) >= active.length) { cur++; best = Math.max(best, cur); } else cur = 0; }
-    return { cur, best };
-  }, [recent, active.length, today]);
+  // روز کامل = روزی که همهٔ عادت‌هایِ نوبت‌دار آن روز انجام شده باشند؛ روز بدون نوبت خنثی است
+  const streak = useMemo(() => dayStreaks(active, (h, d) => doneSet.has(`${h.id}|${d}`), today, 180), [doneSet, active, today]);
 
   const weekday = useMemo(() => {
     const sum = Array(7).fill(0), cnt = Array(7).fill(0);
-    if (active.length) for (let i = 0; i < 90; i++) { const d = addDays(today, -i), w = weekdayIndex(d); sum[w] += Math.min(1, (recent[d] ?? 0) / active.length); cnt[w]++; }
+    for (let i = 0; i < 90; i++) {
+      const d = addDays(today, -i), due = active.filter((h) => isDue(h, d));
+      if (!due.length) continue;
+      const w = weekdayIndex(d);
+      sum[w] += due.filter((h) => doneSet.has(`${h.id}|${d}`)).length / due.length; cnt[w]++;
+    }
     const vals = sum.map((s, i) => (cnt[i] ? s / cnt[i] : 0));
     const max = Math.max(...vals);
     return { vals, best: max > 0 ? vals.indexOf(max) : -1 };
-  }, [recent, active.length, today]);
+  }, [doneSet, active, today]);
 
   const ranked = [...active].map((h) => ({ h, p: m.targetOf(h) ? m.countOf(h.id) / m.targetOf(h) : 0 })).sort((a, b) => b.p - a.p);
   const bestH = ranked[0], worstH = ranked.length > 1 ? ranked[ranked.length - 1] : null;
@@ -116,7 +120,7 @@ export default function Stats() {
       </Card>
 
       <Card className="mt-4" title="روند ماه" sub="درصد عادت‌های انجام‌شده در هر روز"
-        right={<span className="rounded-full bg-soft px-3 py-1 text-xs font-extrabold text-brand">امروز {pctText(dayPct(now.jd))}</span>}>
+        right={<span className="rounded-full bg-soft px-3 py-1 text-xs font-extrabold text-brand">امروز {pctText(dayPct(now.jd) ?? 0)}</span>}>
         <AreaChart values={areaVals} todayIndex={now.jd - 1} />
         <div className="mt-1 flex justify-between text-[10px] font-semibold text-mute"><span>{fa(1)}</span><span>{fa(Math.round(len / 2))}</span><span>{fa(len)}</span></div>
       </Card>

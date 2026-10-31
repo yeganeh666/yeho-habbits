@@ -25,6 +25,8 @@ create table if not exists habits (
   created_at timestamptz not null default now()
 );
 
+alter table habits add column if not exists recurrence jsonb;
+
 create table if not exists habit_targets (
   habit_id uuid references habits(id) on delete cascade,
   jy int not null, jm int not null, target int not null,

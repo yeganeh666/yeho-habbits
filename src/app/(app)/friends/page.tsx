@@ -28,8 +28,8 @@ export default function Friends() {
     Promise.all(f.friends.map(async (fr) => {
       try {
         const b = makeBoard(await fetchBoard(fr.userId, now.jy, now.jm), now.jy, now.jm);
-        const todayDone = b.habits.filter((h) => b.isDone(h.id, today)).length;
-        return [fr.userId, { key: fr.userId, email: fr.email, label: nameOf(fr.email), pct: b.pct, done: b.done, target: b.target, today: todayDone, total: b.habits.length, href: `/friends/${fr.userId}` } as Row] as const;
+        const todayList = b.habitsOn(today), todayDone = todayList.filter((h) => b.isDone(h.id, today)).length;
+        return [fr.userId, { key: fr.userId, email: fr.email, label: nameOf(fr.email), pct: b.pct, done: b.done, target: b.target, today: todayDone, total: todayList.length, href: `/friends/${fr.userId}` } as Row] as const;
       } catch { return [fr.userId, { key: fr.userId, email: fr.email, label: nameOf(fr.email), pct: 0, done: 0, target: 0, today: 0, total: 0, href: `/friends/${fr.userId}`, failed: true } as Row] as const; }
     })).then((r) => alive && setOthers(Object.fromEntries(r))).finally(() => alive && setLoadingBoards(false));
     return () => { alive = false; };
@@ -38,7 +38,7 @@ export default function Friends() {
 
   const active = mine.habits.filter((h) => !h.archived);
   const myDone = active.reduce((s, h) => s + mine.countOf(h.id), 0), myTarget = active.reduce((s, h) => s + mine.targetOf(h), 0);
-  const meRow: Row = { key: "me", email: f.me?.email || "me", label: "تو", pct: myTarget ? myDone / myTarget : 0, done: myDone, target: myTarget, today: active.filter((h) => mine.isDone(h.id, today)).length, total: active.length, me: true };
+  const meRow: Row = { key: "me", email: f.me?.email || "me", label: "تو", pct: myTarget ? myDone / myTarget : 0, done: myDone, target: myTarget, today: mine.habitsOn(today).filter((h) => mine.isDone(h.id, today)).length, total: mine.habitsOn(today).length, me: true };
   const ranking = useMemo(() => [meRow, ...Object.values(others)].sort((a, b) => b.pct - a.pct),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [others, myDone, myTarget, active.length]);
@@ -128,7 +128,7 @@ export default function Friends() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline justify-between gap-2"><p className="truncate font-bold">{r.label}{r.me && <span className="ms-1.5 rounded-full bg-brand/12 px-2 py-0.5 text-[10px] font-bold text-brand">من</span>}</p><span className="text-sm font-extrabold">{pctText(r.pct)}</span></div>
                     <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-soft"><div className="h-full rounded-full transition-[width] duration-500" style={{ width: `${Math.min(100, r.pct * 100)}%`, background: avatarColor(r.email) }} /></div>
-                    <p className="mt-1 text-[11px] font-semibold text-mute">{r.failed ? "خواندن اطلاعات ممکن نشد" : r.total === 0 ? "عادتی برای نمایش ندارد" : `امروز ${fa(r.today)} از ${fa(r.total)} · ${fa(r.done)} تیک این ماه`}</p>
+                    <p className="mt-1 text-[11px] font-semibold text-mute">{r.failed ? "خواندن اطلاعات ممکن نشد" : r.total === 0 ? "امروز عادتی برنامه‌ریزی نشده" : `امروز ${fa(r.today)} از ${fa(r.total)} · ${fa(r.done)} تیک این ماه`}</p>
                   </div>
                   {r.href && <span className="text-mute">‹</span>}
                 </>

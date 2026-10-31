@@ -1,9 +1,10 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { addDays, fa, fromISO, MONTHS, prettyDate, todayISO, WEEKDAYS_SHORT, weekOfDay, weekStartISO } from "@/lib/jalali";
+import { addDays, fa, fromISO, monthRange, MONTHS, prettyDate, todayISO, WEEKDAYS_SHORT, weekOfDay, weekStartISO } from "@/lib/jalali";
 import { useMonth, useTodos } from "@/lib/data";
 import { Check, CalendarBadge, Donut, pctText, SegRing } from "@/components/ui";
+import { dayStreaks, habitStreak } from "@/lib/recurrence";
 import type { Todo } from "@/lib/types";
 
 const tehranHM = () => new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Tehran" }).format(new Date());
@@ -21,25 +22,28 @@ export default function Today() {
   const isToday = day === today;
   const m = useMonth(j.jy, j.jm);
   const t = useTodos(day, day);
-  const habits = m.habits.filter((h) => !h.archived);
+  // همهٔ عادت‌های فعال؛ و آن‌هایی که امروز (روز انتخاب‌شده) نوبت دارند یا تیک خورده‌اند
+  const allHabits = m.habits.filter((h) => !h.archived);
+  const habits = m.habitsOn(day);
   const done = habits.filter((h) => m.isDone(h.id, day)).length;
   const allDone = habits.length > 0 && done === habits.length;
   const week = Array.from({ length: 7 }, (_, i) => addDays(weekStartISO(day), i));
   const weekGoals = m.goals.filter((g) => g.scope === "week" && g.slot === weekOfDay(j.jd));
-  const dayPct = (iso: string) => { const q = fromISO(iso); return q.jy === j.jy && q.jm === j.jm && habits.length ? habits.filter((h) => m.isDone(h.id, iso)).length / habits.length : 0; };
+  const monthEnd = monthRange(j.jy, j.jm).end;
+  const dayPct = (iso: string) => { if (iso > monthEnd) return 0; const list = m.habitsOn(iso); return list.length ? list.filter((h) => m.isDone(h.id, iso)).length / list.length : 0; };
 
   const events = t.todos.filter((x) => x.remind_time);
   const tasks = t.todos.filter((x) => !x.remind_time);
   const todoDone = t.todos.filter((x) => x.done).length;
   const next = isToday ? events.find((x) => !x.done && toMin(x.remind_time!) >= toMin(now)) : undefined;
 
-  const streakOf = (hid: string) => { let s = 0; for (let d = j.jd; d >= 1; d--) { const iso = addDays(day, d - j.jd); if (m.isDone(hid, iso)) s++; else if (d !== j.jd) break; } return s; };
-  let dayStreak = 0;
-  for (let d = j.jd; d >= 1; d--) { const iso = addDays(day, d - j.jd); if (habits.length && habits.every((h) => m.isDone(h.id, iso))) dayStreak++; else if (d !== j.jd) break; else if (!isToday) break; }
+  // رکورد فقط روزهای نوبتِ هر عادت را می‌شمارد و از ماه‌های قبل هم عبور می‌کند
+  const streakOf = (h: (typeof allHabits)[number]) => habitStreak(h, (d) => m.isDone(h.id, d), day);
+  const dayStreak = dayStreaks(allHabits, (h, d) => m.isDone(h.id, d), day).cur;
 
   const remaining = habits.length - done;
-  const headline = habits.length === 0 ? "اولین عادتت را بساز" : allDone ? "عالی بود! همه انجام شد" : done === 0 ? "امروز را شروع کن" : `${fa(remaining)} عادت تا پایان روز مانده`;
-  const sub = habits.length === 0 ? "با یک عادت کوچک شروع کن" : allDone ? "امشب با خیال راحت بخواب 🌙" : done === 0 ? "اولین تیک سخته‌ترینش است" : "کم مانده، ادامه بده";
+  const headline = allHabits.length === 0 ? "اولین عادتت را بساز" : habits.length === 0 ? "امروز عادتی نداری" : allDone ? "عالی بود! همه انجام شد" : done === 0 ? "امروز را شروع کن" : `${fa(remaining)} عادت تا پایان روز مانده`;
+  const sub = allHabits.length === 0 ? "با یک عادت کوچک شروع کن" : habits.length === 0 ? "روز استراحت است 🌤️" : allDone ? "امشب با خیال راحت بخواب 🌙" : done === 0 ? "اولین تیک سخته‌ترینش است" : "کم مانده، ادامه بده";
 
   const addQuick = async (e: React.FormEvent) => { e.preventDefault(); const v = draft.trim(); if (!v) return; setDraft(""); await t.add(day, v, null); };
 
@@ -111,12 +115,14 @@ export default function Today() {
         </div>
         {m.loading ? (
           <ul className="space-y-2.5" aria-busy>{[0, 1, 2].map((i) => <li key={i} className="h-[72px] animate-pulse rounded-row bg-surface/70" />)}</ul>
-        ) : habits.length === 0 ? (
+        ) : allHabits.length === 0 ? (
           <Link href="/habits" className="block rounded-hero border-2 border-dashed border-line p-6 text-center font-bold text-brand">+ افزودن عادت</Link>
+        ) : habits.length === 0 ? (
+          <p className="rounded-row bg-surface p-4 text-center text-sm text-mute">برای این روز عادتی برنامه‌ریزی نشده 🌤️</p>
         ) : (
           <ul className="space-y-2.5">
             {habits.map((h) => {
-              const on = m.isDone(h.id, day), c = m.countOf(h.id), tg = m.targetOf(h), st = streakOf(h.id);
+              const on = m.isDone(h.id, day), c = m.countOf(h.id), tg = m.targetOf(h), st = streakOf(h);
               return (
                 <li key={h.id}>
                   <button onClick={() => m.toggle(h, day)} aria-pressed={on} aria-label={`${h.name.trim()} — ${on ? "انجام شده" : "انجام نشده"}`}

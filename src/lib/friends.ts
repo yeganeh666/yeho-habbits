@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { sb, sessionUser } from "./supabase-browser";
 import { monthLength, monthRange } from "./jalali";
+import { dueCount, isDue, type Recurrence } from "./recurrence";
 
 export type FriendRow = {
   id: string; requester_id: string; requester_email: string; to_email: string;
@@ -9,7 +10,7 @@ export type FriendRow = {
 };
 export type Friend = { rowId: string; userId: string; email: string };
 export type BoardData = {
-  habits: { id: string; name: string; color: string; monthly_target: number | null }[];
+  habits: { id: string; name: string; color: string; monthly_target: number | null; recurrence?: Recurrence | null; created_at?: string }[];
   logs: { habit_id: string; day: string }[];
   targets: { habit_id: string; target: number }[];
 };
@@ -85,12 +86,18 @@ export function makeBoard(b: BoardData | null, jy: number, jm: number) {
   const set = new Set((b?.logs ?? []).map((l) => `${l.habit_id}|${l.day}`));
   const tg = Object.fromEntries((b?.targets ?? []).map((t) => [t.habit_id, t.target]));
   const habits = b?.habits ?? [];
-  const targetOf = (h: BoardData["habits"][number]) => tg[h.id] ?? h.monthly_target ?? monthLength(jy, jm);
+  const targetOf = (h: BoardData["habits"][number]) => (h.recurrence ? dueCount(h, jy, jm) : tg[h.id] ?? h.monthly_target ?? monthLength(jy, jm));
+  const isDueOn = (h: BoardData["habits"][number], day: string) => isDue(h, day);
   const isDone = (hid: string, day: string) => set.has(`${hid}|${day}`);
-  const countOf = (hid: string) => (b?.logs ?? []).filter((l) => l.habit_id === hid).length;
+  const countOf = (hid: string) => {
+    const h = habits.find((x) => x.id === hid);
+    return (b?.logs ?? []).filter((l) => l.habit_id === hid && (!h?.recurrence || isDue(h, l.day))).length;
+  };
+  /** عادت‌هایی که در یک روز نوبت دارند یا تیک خورده‌اند */
+  const habitsOn = (day: string) => habits.filter((h) => isDue(h, day) || set.has(`${h.id}|${day}`));
   const done = habits.reduce((s, h) => s + countOf(h.id), 0);
   const target = habits.reduce((s, h) => s + targetOf(h), 0);
-  return { habits, isDone, countOf, targetOf, done, target, pct: target ? done / target : 0 };
+  return { habits, isDone, isDueOn, countOf, targetOf, habitsOn, done, target, pct: target ? done / target : 0 };
 }
 
 export function useFriendBoard(friendId: string | null, jy: number, jm: number) {
