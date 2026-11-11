@@ -36,3 +36,19 @@ self.addEventListener("fetch", (e) => {
     })());
   }
 });
+
+// کلیک روی اعلان: پنجرهٔ باز اپ را جلو بیاور، وگرنه اپ را باز کن
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || "/";
+  e.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const c of wins) {
+      if (new URL(c.url).origin !== self.location.origin) continue;
+      await c.focus();
+      if (new URL(c.url).pathname !== url && "navigate" in c) { try { await c.navigate(url); } catch {} }
+      return;
+    }
+    await self.clients.openWindow(url);
+  })());
+});
