@@ -5,6 +5,7 @@ import { sb, sessionUser, migrateLocalDataToSupabase } from "@/lib/supabase-brow
 import { getClientSupabaseCredentials } from "@/lib/supabase-config";
 import { btnGhost, btnPrimary, CalendarBadge, Field, inputCls } from "@/components/ui";
 import { getLocalScriptUrl, setLocalScriptUrl, toast } from "@/lib/data";
+import { fa, fromISO, MONTHS, shiftMonth, todayISO } from "@/lib/jalali";
 import { GOOGLE_APPS_SCRIPT_SOURCE } from "@/lib/apps-script";
 import type { Settings } from "@/lib/types";
 
@@ -83,16 +84,23 @@ create table if not exists user_settings (
   last_sync_at timestamptz
 );
 
+create table if not exists google_tokens (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  refresh_token text not null,
+  updated_at timestamptz not null default now()
+);
+
 alter table habits enable row level security;
 alter table habit_targets enable row level security;
 alter table habit_logs enable row level security;
 alter table goals enable row level security;
 alter table todos enable row level security;
 alter table user_settings enable row level security;
+alter table google_tokens enable row level security;
 
 create policy "own habits" on habits for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy "own targets" on habit_targets for all using (exists (select 1 from habits h where h.id = habit_id and h.user_id = auth.uid())) with check (exists (select 1 from habits h where h.id = habit_id and h.user_id = auth.uid()));
-create policy "own logs" on habit_logs for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy "own logs" on habit_logs for all using (user_id = auth.uid() and exists (select 1 from habits h where h.id = habit_id and h.user_id = auth.uid())) with check (user_id = auth.uid() and exists (select 1 from habits h where h.id = habit_id and h.user_id = auth.uid()));
 create policy "own goals" on goals for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy "own todos" on todos for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy "own settings" on user_settings for all using (user_id = auth.uid()) with check (user_id = auth.uid());`;
@@ -110,6 +118,8 @@ export default function SettingsPage() {
   const [copiedScript, setCopiedScript] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
   const [showSqlGuide, setShowSqlGuide] = useState(false);
+  const [exporting, setExporting] = useState<string | null>(null);
+  const [exportUrl, setExportUrl] = useState<string | null>(null);
 
   // Supabase credentials state
   const [supabaseHost, setSupabaseHost] = useState("");
@@ -222,6 +232,28 @@ export default function SettingsPage() {
       toast("خطا در اتصال");
     } finally {
       setTesting(false);
+    }
+  }
+
+  async function exportMonth(jy: number, jm: number) {
+    const key = `${jy}-${jm}`;
+    setExporting(key);
+    try {
+      const res = await fetch("/api/sheets/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jy, jm, scriptUrl: scriptUrl.trim() || getLocalScriptUrl() }),
+      }).then((x) => x.json());
+      if (res.ok) {
+        setExportUrl(res.url);
+        toast(`خروجی ${MONTHS[jm - 1]} در Google Sheets به‌روز شد`);
+      } else {
+        toast(res.message || "خروجی ساخته نشد؛ دوباره تلاش کنید");
+      }
+    } catch {
+      toast("ارتباط با سرور برقرار نشد");
+    } finally {
+      setExporting(null);
     }
   }
 
@@ -403,6 +435,46 @@ export default function SettingsPage() {
             </div>
           )}
         </div>
+      </section>
+
+      {/* خروجی یک‌طرفه به Google Sheets */}
+      <section className="mb-5 rounded-hero bg-surface p-5 shadow-card">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-xl">📊</span>
+          <h2 className="text-lg font-extrabold text-ink">خروجی به Google Sheets</h2>
+        </div>
+        <p className="mb-4 text-xs leading-6 text-mute">
+          جدول عادت‌های یک ماه در یک فایل Google Sheets در Drive شما نوشته می‌شود. هر بار خروجی، برگهٔ همان ماه از نو ساخته می‌شود؛
+          تغییراتی که در شیت بدهید به اپ برنمی‌گردد.
+        </p>
+        <p className="mb-3 rounded-2xl bg-soft/50 p-3 text-xs leading-6 text-mute">
+          از همان اسکریپت گوگلِ بخش تقویم استفاده می‌شود (بدون Google Cloud). اگر اسکریپت را قبلاً نصب کرده‌اید، یک‌بار کد جدید را کپی کنید
+          و در Apps Script با <b>Deploy ← Manage deployments ← Edit ← New version</b> به‌روز کنید؛ آدرس آن عوض نمی‌شود.
+        </p>
+        {(() => {
+          const now = fromISO(todayISO());
+          const prev = shiftMonth(now.jy, now.jm, -1);
+          return (
+            <div className="grid grid-cols-2 gap-2">
+              {[{ jy: now.jy, jm: now.jm }, prev].map((m) => (
+                <button
+                  key={`${m.jy}-${m.jm}`}
+                  type="button"
+                  className={`${btnPrimary} text-sm`}
+                  disabled={!scriptUrl.trim() || exporting !== null}
+                  onClick={() => exportMonth(m.jy, m.jm)}
+                >
+                  {exporting === `${m.jy}-${m.jm}` ? "در حال نوشتن…" : `${MONTHS[m.jm - 1]} ${fa(m.jy)}`}
+                </button>
+              ))}
+            </div>
+          );
+        })()}
+        {exportUrl && (
+          <a href={exportUrl} target="_blank" rel="noopener noreferrer" className="mt-3 block text-center text-xs font-bold text-brand underline">
+            باز کردن شیت
+          </a>
+        )}
       </section>
 
       {/* راهنمای نصب PWA روی گوشی */}
