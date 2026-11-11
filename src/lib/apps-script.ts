@@ -5,7 +5,7 @@
 
 export const GOOGLE_APPS_SCRIPT_SOURCE = `/**
  * اسکریپت اتصال تقویم گوگل (Google Calendar) و خروجی Google Sheets
- * نسخهٔ ۲ — اگر نسخهٔ قبلی را نصب کرده‌اید، این کد را جایگزین کنید و
+ * نسخهٔ ۳ — اگر نسخهٔ قبلی را نصب کرده‌اید، این کد را جایگزین کنید و
  * Deploy > Manage deployments > Edit > Version: New version را بزنید (آدرس عوض نمی‌شود).
  * 
  * نحوه نصب:
@@ -27,7 +27,7 @@ function doPost(e) {
     // ۱. تست اتصال
     if (action === "test") {
       var userEmail = Session.getActiveUser().getEmail() || "connected";
-      return jsonResponse({ ok: true, email: userEmail, version: 2, sheets: true });
+      return jsonResponse({ ok: true, email: userEmail, version: 3, sheets: true, repeat: true });
     }
 
     // ۱-ب. خروجی یک‌طرفهٔ یک ماه به Google Sheets
@@ -83,38 +83,57 @@ function doPost(e) {
       var end = new Date(start.getTime() + duration * 60 * 1000);
 
       // اگر قبلاً رویدادی ساخته شده بود، حذفش کن تا جدید جایگزین شود
-      if (body.oldEventId) {
-        try {
-          var oldEv = cal.getEventById(body.oldEventId);
-          if (oldEv) oldEv.deleteEvent();
-        } catch (e) {}
-      }
+      if (body.oldEventId) deleteEventIds(cal, body.oldEventId);
 
       var prefix = eventType === "meeting" ? "📅 جلسه: " : "🔔 یادآور: ";
       var fullSummary = summary.indexOf("جلسه") >= 0 || summary.indexOf("یادآور") >= 0 ? summary : (prefix + summary);
 
-      var event = cal.createEvent(fullSummary, start, end, { description: desc });
-      try {
-        event.removeAllReminders();
-        if (eventType === "meeting") {
-          event.addPopupReminder(10); // ۱۰ دقیقه قبل از جلسه
-        } else {
-          event.addPopupReminder(0); // دقیقاً در زمان یادآور
-        }
-      } catch (e) {}
+      var rep = body.repeat || null;
+      var minutesBefore = eventType === "meeting" ? 10 : 0;
+      var opts = { description: desc };
 
+      // تکرار ماهانهٔ شمسی: برای هر تاریخ یک رویداد؛ شناسه‌ها با ویرگول جدا می‌شوند
+      if (rep && rep.freq === "dates") {
+        var ids = [];
+        for (var i = 0; i < rep.dates.length; i++) {
+          var dp = rep.dates[i].split("-");
+          var s2 = new Date(parseInt(dp[0], 10), parseInt(dp[1], 10) - 1, parseInt(dp[2], 10), hours, mins, 0);
+          var e2 = new Date(s2.getTime() + duration * 60 * 1000);
+          var ev2 = cal.createEvent(fullSummary, s2, e2, opts);
+          setReminder(ev2, minutesBefore);
+          ids.push(ev2.getId());
+        }
+        return jsonResponse({ ok: true, eventId: ids.join(","), repeated: true });
+      }
+
+      // تکرار روزانه یا هفتگی: یک رویداد تکرارشونده
+      if (rep && (rep.freq === "daily" || rep.freq === "weekly")) {
+        var recurrence = CalendarApp.newRecurrence();
+        var rule = rep.freq === "daily" ? recurrence.addDailyRule() : recurrence.addWeeklyRule();
+        rule.interval(rep.interval || 1);
+        if (rep.freq === "weekly" && rep.weekdays && rep.weekdays.length) {
+          var wd = [];
+          for (var k = 0; k < rep.weekdays.length; k++) wd.push(CalendarApp.Weekday[rep.weekdays[k]]);
+          rule.onlyOnWeekdays(wd);
+        }
+        if (rep.until) {
+          var up = rep.until.split("-");
+          rule.until(new Date(parseInt(up[0], 10), parseInt(up[1], 10) - 1, parseInt(up[2], 10), 23, 59, 59));
+        }
+        var series = cal.createEventSeries(fullSummary, start, end, recurrence, opts);
+        setReminder(series, minutesBefore);
+        return jsonResponse({ ok: true, eventId: series.getId(), repeated: true });
+      }
+
+      var event = cal.createEvent(fullSummary, start, end, opts);
+      setReminder(event, minutesBefore);
       return jsonResponse({ ok: true, eventId: event.getId() });
     }
 
     // ۳. حذف رویداد از تقویم
     if (action === "calendar_delete") {
       var cal = CalendarApp.getDefaultCalendar();
-      if (body.eventId) {
-        try {
-          var ev = cal.getEventById(body.eventId);
-          if (ev) ev.deleteEvent();
-        } catch (e) {}
-      }
+      if (body.eventId) deleteEventIds(cal, body.eventId);
       return jsonResponse({ ok: true });
     }
 
@@ -130,6 +149,30 @@ function doGet(e) {
     status: "active",
     message: "اسکریپت تقویم گوگل فعال است."
   });
+}
+
+// حذف یک یا چند شناسه (جداشده با ویرگول)؛ سری‌های تکرارشونده کامل حذف می‌شوند
+function deleteEventIds(cal, idList) {
+  var ids = String(idList).split(",");
+  for (var i = 0; i < ids.length; i++) {
+    var id = ids[i].replace(/^\s+|\s+$/g, "");
+    if (!id) continue;
+    try {
+      var series = cal.getEventSeriesById(id);
+      if (series) { series.deleteEventSeries(); continue; }
+    } catch (e) {}
+    try {
+      var ev = cal.getEventById(id);
+      if (ev) ev.deleteEvent();
+    } catch (e2) {}
+  }
+}
+
+function setReminder(ev, minutesBefore) {
+  try {
+    ev.removeAllReminders();
+    ev.addPopupReminder(minutesBefore);
+  } catch (e) {}
 }
 
 function jsonResponse(obj) {
