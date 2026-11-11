@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { currentUser, serverClient } from "@/lib/supabase-server";
 import { authedClient, gfetch } from "@/lib/google";
 import { todayISO } from "@/lib/jalali";
-import { callAppsScript } from "@/lib/apps-script";
+import { callAppsScript, isAppsScriptUrl } from "@/lib/apps-script";
 
 export const dynamic = "force-dynamic";
 const CAL = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
@@ -75,16 +75,13 @@ export async function POST(req: Request) {
   const targetDate = date || (row ? (kind === "habit" ? todayISO() : row.day) : todayISO()) || todayISO();
   const oldEvId = eventId || (row ? row[col] : null);
 
-  // بررسی آدرس اسکریپت تقویم کاربر: ابتدا از بدنه، سپس از کوکی، سپس از متغیر محیطی، سپس از تنظیمات
+  // بررسی آدرس اسکریپت تقویم کاربر: ابتدا از بدنه، سپس از کوکی، سپس از تنظیمات (فقط آدرس‌های script.google.com)
   let scriptUrlToUse = typeof scriptUrl === "string" ? scriptUrl.trim() : "";
   if (!scriptUrlToUse) {
     try {
       const cStore = cookies();
       scriptUrlToUse = cStore.get("calendar_script_url")?.value ? decodeURIComponent(cStore.get("calendar_script_url")!.value) : "";
     } catch {}
-  }
-  if (!scriptUrlToUse && process.env.GOOGLE_APPS_SCRIPT_URL) {
-    scriptUrlToUse = process.env.GOOGLE_APPS_SCRIPT_URL.trim();
   }
   if (!scriptUrlToUse) {
     try {
@@ -93,6 +90,9 @@ export async function POST(req: Request) {
     } catch {}
   }
 
+  // Anything that is not a Google Apps Script web-app URL is ignored (no requests to arbitrary hosts).
+  if (scriptUrlToUse && !isAppsScriptUrl(scriptUrlToUse)) scriptUrlToUse = "";
+
   const duration = Number(durationMinutes) > 0 ? Number(durationMinutes) : (type === "meeting" ? 45 : 30);
   const eventType = type === "meeting" ? "meeting" : "reminder";
   const summary = eventType === "meeting" ? `📅 جلسه: ${rawTitle}` : `🔔 یادآور: ${rawTitle}`;
@@ -100,7 +100,7 @@ export async function POST(req: Request) {
 
   // ۱. عملیات حذف رویداد یا یادآور
   if (!time) {
-    if (scriptUrlToUse && scriptUrlToUse.startsWith("http")) {
+    if (scriptUrlToUse) {
       if (oldEvId) {
         await callAppsScript(scriptUrlToUse, "calendar_delete", { eventId: oldEvId }).catch(() => null);
       }
@@ -124,7 +124,7 @@ export async function POST(req: Request) {
   }
 
   // ۲. اولویت ۱: اتصال با اسکریپت تقویم گوگل (Google Apps Script)
-  if (scriptUrlToUse && scriptUrlToUse.startsWith("http")) {
+  if (scriptUrlToUse) {
     try {
       const res = await callAppsScript(scriptUrlToUse, "calendar_create", {
         summary,
