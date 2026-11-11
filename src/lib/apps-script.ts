@@ -105,9 +105,30 @@ function jsonResponse(obj) {
 }
 `;
 
+/**
+ * Only Google Apps Script web-app URLs are allowed, so the server can never be
+ * used to send requests to arbitrary or internal addresses (SSRF).
+ * Accepts https://script.google.com/macros/s/<id>/exec and the Workspace form
+ * https://script.google.com/a/macros/<domain>/s/<id>/exec
+ */
+export function isAppsScriptUrl(raw?: string | null): boolean {
+  if (!raw) return false;
+  let u: URL;
+  try {
+    u = new URL(raw.trim());
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "https:" || u.hostname !== "script.google.com" || u.port || u.username || u.password) return false;
+  return /^\/(a\/macros\/[^/]+|macros)\/s\/[A-Za-z0-9_-]+\/exec$/.test(u.pathname);
+}
+
 export async function callAppsScript(scriptUrl: string, action: string, data: Record<string, any> = {}): Promise<any> {
   const cleanUrl = scriptUrl.trim();
   if (!cleanUrl) throw new Error("آدرس اسکریپت تقویم گوگل وارد نشده است.");
+  if (!isAppsScriptUrl(cleanUrl)) {
+    throw new Error("آدرس اسکریپت معتبر نیست؛ باید با https://script.google.com/macros/s/ شروع شود و به /exec ختم شود.");
+  }
   const payload = { action, ...data };
   const res = await fetch(cleanUrl, {
     method: "POST",

@@ -134,9 +134,10 @@ create policy "own targets" on habit_targets for all
 
 -- سیاست دسترسی گزارش تیک‌ها (habit_logs)
 drop policy if exists "own logs" on habit_logs;
+-- علاوه بر user_id، مالکیت خود عادت هم بررسی می‌شود تا کسی نتواند برای عادت دیگری تیک ثبت کند
 create policy "own logs" on habit_logs for all
-  using (user_id = auth.uid())
-  with check (user_id = auth.uid());
+  using (user_id = auth.uid() and exists (select 1 from habits h where h.id = habit_id and h.user_id = auth.uid()))
+  with check (user_id = auth.uid() and exists (select 1 from habits h where h.id = habit_id and h.user_id = auth.uid()));
 
 -- سیاست دسترسی اهداف (goals)
 drop policy if exists "own goals" on goals;

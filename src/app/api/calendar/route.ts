@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { adminClient, currentUser, serverClient } from "@/lib/supabase-server";
+import { currentUser, serverClient } from "@/lib/supabase-server";
 import { authedClient, gfetch } from "@/lib/google";
 import { todayISO } from "@/lib/jalali";
-import { callAppsScript } from "@/lib/apps-script";
+import { callAppsScript, isAppsScriptUrl } from "@/lib/apps-script";
 
 export const dynamic = "force-dynamic";
 const CAL = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
@@ -44,24 +44,27 @@ export async function POST(req: Request) {
     eventId,
   } = bodyData;
 
-  const db = adminClient() || serverClient();
+  // User-scoped client: Row Level Security applies, so a request can only touch the caller's own rows.
+  // Never use the service-role client here — it bypasses RLS and would let anyone edit anyone's rows by id.
+  const db = serverClient();
+  if (!db) return NextResponse.json({ error: "not_configured" }, { status: 500 });
   const table = kind === "habit" ? "habits" : "todos";
   const col = kind === "habit" ? "reminder_event_id" : "event_id";
   const timeCol = kind === "habit" ? "reminder_time" : "remind_time";
 
   // استخراج ردیف در صورت وجود در دیتابیس Supabase
   let row: any = null;
-  if (db && id) {
+  if (id) {
     try {
-      const { data } = await db.from(table).select("*").eq("id", id).maybeSingle();
+      const { data } = await db.from(table).select("*").eq("id", id).eq("user_id", user.id).maybeSingle();
       row = data;
     } catch {}
   }
 
   const updateRow = async (patch: Record<string, any>) => {
-    if (db && row && id) {
+    if (row && id) {
       try {
-        await db.from(table).update(patch).eq("id", id);
+        await db.from(table).update(patch).eq("id", id).eq("user_id", user.id);
       } catch {}
     }
   };
@@ -72,7 +75,7 @@ export async function POST(req: Request) {
   const targetDate = date || (row ? (kind === "habit" ? todayISO() : row.day) : todayISO()) || todayISO();
   const oldEvId = eventId || (row ? row[col] : null);
 
-  // بررسی آدرس اسکریپت تقویم کاربر: ابتدا از بدنه، سپس از کوکی، سپس از متغیر محیطی، سپس از تنظیمات
+  // بررسی آدرس اسکریپت تقویم کاربر: ابتدا از بدنه، سپس از کوکی، سپس از تنظیمات (فقط آدرس‌های script.google.com)
   let scriptUrlToUse = typeof scriptUrl === "string" ? scriptUrl.trim() : "";
   if (!scriptUrlToUse) {
     try {
@@ -80,15 +83,15 @@ export async function POST(req: Request) {
       scriptUrlToUse = cStore.get("calendar_script_url")?.value ? decodeURIComponent(cStore.get("calendar_script_url")!.value) : "";
     } catch {}
   }
-  if (!scriptUrlToUse && process.env.GOOGLE_APPS_SCRIPT_URL) {
-    scriptUrlToUse = process.env.GOOGLE_APPS_SCRIPT_URL.trim();
-  }
-  if (!scriptUrlToUse && db) {
+  if (!scriptUrlToUse) {
     try {
       const { data: st } = await db.from("user_settings").select("script_url").eq("user_id", user.id).maybeSingle();
       scriptUrlToUse = st?.script_url || "";
     } catch {}
   }
+
+  // Anything that is not a Google Apps Script web-app URL is ignored (no requests to arbitrary hosts).
+  if (scriptUrlToUse && !isAppsScriptUrl(scriptUrlToUse)) scriptUrlToUse = "";
 
   const duration = Number(durationMinutes) > 0 ? Number(durationMinutes) : (type === "meeting" ? 45 : 30);
   const eventType = type === "meeting" ? "meeting" : "reminder";
@@ -97,7 +100,7 @@ export async function POST(req: Request) {
 
   // ۱. عملیات حذف رویداد یا یادآور
   if (!time) {
-    if (scriptUrlToUse && scriptUrlToUse.startsWith("http")) {
+    if (scriptUrlToUse) {
       if (oldEvId) {
         await callAppsScript(scriptUrlToUse, "calendar_delete", { eventId: oldEvId }).catch(() => null);
       }
@@ -121,7 +124,7 @@ export async function POST(req: Request) {
   }
 
   // ۲. اولویت ۱: اتصال با اسکریپت تقویم گوگل (Google Apps Script)
-  if (scriptUrlToUse && scriptUrlToUse.startsWith("http")) {
+  if (scriptUrlToUse) {
     try {
       const res = await callAppsScript(scriptUrlToUse, "calendar_create", {
         summary,
