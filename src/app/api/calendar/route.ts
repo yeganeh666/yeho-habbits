@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { adminClient, currentUser, serverClient } from "@/lib/supabase-server";
+import { currentUser, serverClient } from "@/lib/supabase-server";
 import { authedClient, gfetch } from "@/lib/google";
 import { todayISO } from "@/lib/jalali";
 import { callAppsScript } from "@/lib/apps-script";
@@ -44,24 +44,27 @@ export async function POST(req: Request) {
     eventId,
   } = bodyData;
 
-  const db = adminClient() || serverClient();
+  // User-scoped client: Row Level Security applies, so a request can only touch the caller's own rows.
+  // Never use the service-role client here — it bypasses RLS and would let anyone edit anyone's rows by id.
+  const db = serverClient();
+  if (!db) return NextResponse.json({ error: "not_configured" }, { status: 500 });
   const table = kind === "habit" ? "habits" : "todos";
   const col = kind === "habit" ? "reminder_event_id" : "event_id";
   const timeCol = kind === "habit" ? "reminder_time" : "remind_time";
 
   // استخراج ردیف در صورت وجود در دیتابیس Supabase
   let row: any = null;
-  if (db && id) {
+  if (id) {
     try {
-      const { data } = await db.from(table).select("*").eq("id", id).maybeSingle();
+      const { data } = await db.from(table).select("*").eq("id", id).eq("user_id", user.id).maybeSingle();
       row = data;
     } catch {}
   }
 
   const updateRow = async (patch: Record<string, any>) => {
-    if (db && row && id) {
+    if (row && id) {
       try {
-        await db.from(table).update(patch).eq("id", id);
+        await db.from(table).update(patch).eq("id", id).eq("user_id", user.id);
       } catch {}
     }
   };
@@ -83,7 +86,7 @@ export async function POST(req: Request) {
   if (!scriptUrlToUse && process.env.GOOGLE_APPS_SCRIPT_URL) {
     scriptUrlToUse = process.env.GOOGLE_APPS_SCRIPT_URL.trim();
   }
-  if (!scriptUrlToUse && db) {
+  if (!scriptUrlToUse) {
     try {
       const { data: st } = await db.from("user_settings").select("script_url").eq("user_id", user.id).maybeSingle();
       scriptUrlToUse = st?.script_url || "";
