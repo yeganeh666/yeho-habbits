@@ -4,9 +4,8 @@ import Link from "next/link";
 import { fa, todayISO } from "@/lib/jalali";
 import { CalendarBadge } from "@/components/ui";
 import { toast, useMonth, useTodos } from "@/lib/data";
-
-type Mode = "focus" | "short_break" | "long_break";
-const TIMES: Record<Mode, number> = { focus: 25 * 60, short_break: 5 * 60, long_break: 15 * 60 };
+import { clearRun, finishRound, loadDay, loadRun, saveRun, TIMES, type Mode } from "@/lib/pomodoro";
+import { notifyState, requestNotify, showNotice, type NotifyState } from "@/lib/notify";
 const MODES: { key: Mode; label: string; min: number; color: string }[] = [
   { key: "focus", label: "تمرکز", min: 25, color: "rgb(var(--brand))" },
   { key: "short_break", label: "استراحت کوتاه", min: 5, color: "rgb(var(--mint))" },
@@ -27,6 +26,7 @@ export default function PomodoroPage() {
   const [minutesToday, setMinutesToday] = useState(0);
   const [task, setTask] = useState("");
   const endAt = useRef<number | null>(null);
+  const [notif, setNotif] = useState<NotifyState>("unsupported");
 
   const m = useMonth(+today.split("-")[0], +today.split("-")[1]);
   const t = useTodos(today, today);
@@ -35,8 +35,10 @@ export default function PomodoroPage() {
   const cur = MODES.find((x) => x.key === mode)!;
 
   useEffect(() => {
-    try { const raw = localStorage.getItem(`pomodoro_${today}`); if (raw) { const d = JSON.parse(raw); setMinutesToday(d.minutes || 0); setRounds(d.rounds || 0); } } catch {}
+    const d = loadDay(today);
+    setMinutesToday(d.minutes); setRounds(d.rounds);
   }, [today]);
+  useEffect(() => { setNotif(notifyState()); }, []);
 
   const chime = () => {
     try {
@@ -49,31 +51,69 @@ export default function PomodoroPage() {
     if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 300]);
   };
 
-  const goTo = (next: Mode) => { setRunning(false); endAt.current = null; setMode(next); setTimeLeft(TIMES[next]); };
+  const goTo = (next: Mode) => { setRunning(false); endAt.current = null; clearRun(); setMode(next); setTimeLeft(TIMES[next]); };
 
-  const complete = () => {
-    setRunning(false); endAt.current = null; chime();
-    if (mode === "focus") {
-      const nr = rounds + 1, nm = minutesToday + TIMES.focus / 60;
-      setRounds(nr); setMinutesToday(nm);
-      try { localStorage.setItem(`pomodoro_${today}`, JSON.stringify({ minutes: nm, rounds: nr })); } catch {}
-      toast("🎉 آفرین! یک دورهٔ تمرکز ۲۵ دقیقه‌ای تمام شد");
-      goTo(nr % 4 === 0 ? "long_break" : "short_break");
-    } else { toast("☕ استراحت تمام شد؛ آماده‌ای برای دور بعد؟"); goTo("focus"); }
+  // اعلان سیستم‌عامل فقط وقتی لازم است که کاربر اپ را نمی‌بیند (پس‌زمینه، قفل صفحه یا پنجرهٔ دیگر)
+  const notifyEnd = (done: Mode, next: Mode) => {
+    if (typeof document !== "undefined" && document.visibilityState === "visible" && document.hasFocus()) return;
+    const label = next === "long_break" ? "استراحت بلند" : "استراحت کوتاه";
+    if (done === "focus") showNotice("🎉 دورهٔ تمرکز تمام شد", `وقت ${label} است`, "/pomodoro");
+    else showNotice("☕ استراحت تمام شد", "آماده‌ای برای دور بعد؟", "/pomodoro");
+  };
+
+  // m = مرحله‌ای که تمام شده؛ حالت و آمار از ورودی و حافظه می‌آیند، نه از state قدیمیِ بسته‌شده در تایمر
+  const complete = (m: Mode = mode) => {
+    setRunning(false); endAt.current = null; clearRun(); chime();
+    const r = finishRound(m, today);
+    setRounds(r.rounds); setMinutesToday(r.minutes);
+    notifyEnd(m, r.next);
+    toast(m === "focus" ? "🎉 آفرین! یک دورهٔ تمرکز ۲۵ دقیقه‌ای تمام شد" : "☕ استراحت تمام شد؛ آماده‌ای برای دور بعد؟");
+    goTo(r.next);
   };
   const completeRef = useRef(complete); completeRef.current = complete;
 
-  // تایمر بر پایهٔ زمان پایان، تا با رفتن به پس‌زمینه عقب نیفتد
+  // اگر اپ وسط تایمر بسته یا از حافظه پاک شده بود: ادامه بده، یا اگر زمانش گذشته مرحله را تمام کن
+  useEffect(() => {
+    const run = loadRun();
+    if (run.kind === "running") {
+      setMode(run.mode); endAt.current = run.endAt;
+      setTimeLeft(Math.max(0, Math.round((run.endAt - Date.now()) / 1000)));
+      setRunning(true);
+    } else if (run.kind === "expired") {
+      completeRef.current(run.mode);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // تایمر بر پایهٔ زمان پایان، تا با رفتن به پس‌زمینه عقب نیفتد.
+  // علاوه بر interval یک setTimeout تکی هم داریم (در پس‌زمینه کندتر از interval نمی‌شود)،
+  // و با برگشت به اپ فوراً بررسی می‌کنیم.
   useEffect(() => {
     if (!running) return;
-    if (endAt.current === null) endAt.current = Date.now() + timeLeft * 1000;
-    const id = setInterval(() => {
-      const left = Math.max(0, Math.round((endAt.current! - Date.now()) / 1000));
+    if (endAt.current === null) { endAt.current = Date.now() + timeLeft * 1000; saveRun({ mode, endAt: endAt.current }); }
+    const tick = () => {
+      if (endAt.current === null) return; // قبلاً تمام شده
+      const left = Math.max(0, Math.round((endAt.current - Date.now()) / 1000));
       setTimeLeft(left);
-      if (left <= 0) { clearInterval(id); completeRef.current(); }
-    }, 250);
-    return () => clearInterval(id);
+      if (left <= 0) completeRef.current();
+    };
+    const id = setInterval(tick, 250);
+    const to = setTimeout(tick, Math.max(0, endAt.current - Date.now()) + 50);
+    const vis = () => { if (document.visibilityState === "visible") tick(); };
+    document.addEventListener("visibilitychange", vis);
+    return () => { clearInterval(id); clearTimeout(to); document.removeEventListener("visibilitychange", vis); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running]);
+
+  // صفحه را روشن نگه دار تا موقع تایمر قفل نشود و تایمر در پس‌زمینه متوقف نشود
+  useEffect(() => {
+    if (!running || typeof navigator === "undefined" || !("wakeLock" in navigator)) return;
+    let lock: any = null, off = false;
+    const acquire = async () => { try { lock = await (navigator as any).wakeLock.request("screen"); } catch {} };
+    const vis = () => { if (!off && document.visibilityState === "visible") acquire(); };
+    acquire();
+    document.addEventListener("visibilitychange", vis);
+    return () => { off = true; document.removeEventListener("visibilitychange", vis); try { lock?.release?.().catch(() => {}); } catch {} };
   }, [running]);
 
   const mm = String(Math.floor(timeLeft / 60)).padStart(2, "0"), ss = String(timeLeft % 60).padStart(2, "0");
@@ -82,8 +122,21 @@ export default function PomodoroPage() {
     return () => { document.title = "عادت‌ها"; };
   }, [running, mm, ss, cur.label]);
 
-  const toggle = () => { if (running) { setRunning(false); endAt.current = null; } else setRunning(true); };
-  const reset = () => { setRunning(false); endAt.current = null; setTimeLeft(TIMES[mode]); };
+  const toggle = () => {
+    if (running) { setRunning(false); endAt.current = null; clearRun(); return; }
+    // مجوز اعلان فقط با کلیک کاربر گرفته می‌شود؛ شروع تایمر همین کلیک است
+    if (notif === "default") requestNotify().then(setNotif);
+    setRunning(true);
+  };
+  const reset = () => { setRunning(false); endAt.current = null; clearRun(); setTimeLeft(TIMES[mode]); };
+  const enableNotify = async () => {
+    const st = await requestNotify();
+    setNotif(st);
+    if (st === "granted") {
+      const ok = await showNotice("🔔 اعلان‌ها روشن شد", "پایان هر دورهٔ تمرکز و استراحت را اعلام می‌کنم", "/pomodoro");
+      if (!ok) toast("اعلان فعال شد ولی نمایش آن ناموفق بود؛ تنظیمات اعلان گوشی را بررسی کنید");
+    } else if (st === "denied") toast("اعلان‌ها مسدود شد؛ از تنظیمات مرورگر یا گوشی آن را فعال کنید");
+  };
   const skip = () => goTo(mode === "focus" ? "short_break" : "focus");
 
   const size = 264, stroke = 16, r = (size - stroke) / 2, C = 2 * Math.PI * r;
@@ -150,6 +203,12 @@ export default function PomodoroPage() {
             {running ? <Icon size={30} fill d="M7 4h3v16H7zM14 4h3v16h-3z" /> : <Icon size={30} fill d="M7 4.5v15l12.5-7.5z" />}
           </button>
           <button onClick={skip} aria-label="رد کردن این مرحله" className="grid h-[52px] w-[52px] place-items-center rounded-full bg-soft text-mute transition-transform active:scale-90"><Icon d="M5 5l9 7-9 7zM19 5v14" /></button>
+        </div>
+        <div className="relative mt-5 text-center text-xs font-semibold leading-6 text-mute">
+          {notif === "granted" && <p>🔔 اعلان پایان دوره روشن است. برای دقیق‌ترین زمان، اپ را باز و صفحه را روشن بگذارید.</p>}
+          {notif === "default" && <button onClick={enableNotify} className="rounded-full bg-soft px-4 py-2 font-bold text-brand active:scale-95">🔔 روشن کردن اعلان پایان دوره</button>}
+          {notif === "denied" && <p>🔕 اعلان‌ها مسدود است؛ از تنظیمات مرورگر یا گوشی برای این اپ آن را فعال کنید.</p>}
+          {notif === "unsupported" && <p>این مرورگر از اعلان پشتیبانی نمی‌کند. در آیفون ابتدا اپ را با «Add to Home Screen» نصب کنید و از همان آیکون باز کنید.</p>}
         </div>
       </section>
 
