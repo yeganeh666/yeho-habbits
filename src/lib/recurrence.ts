@@ -156,3 +156,53 @@ export function dayStreaks<T extends Schedulable>(
   }
   return { cur, best };
 }
+
+/** اولین نوبت عادت از روز داده‌شده به بعد (حداکثر یک سال جلوتر)؛ null یعنی نوبتی نمانده */
+export function nextDue(h: Schedulable, from: string, span = 400): string | null {
+  for (let i = 0; i <= span; i++) {
+    const d = addDays(from, i);
+    if (isDue(h, d)) return d;
+  }
+  return null;
+}
+
+/** روز آخرین نوبت، اگر تکرار پایان داشته باشد */
+function endDateOf(r: Recurrence): string | null {
+  if (r.end?.type === "on") return r.end.date;
+  if (r.end?.type === "after") return lastOccurrence(r, r.end.count);
+  return null;
+}
+
+/** روزهای هفته به ترتیب این اپ (۰ = شنبه) در قالب iCalendar */
+const BYDAY = ["SA", "SU", "MO", "TU", "WE", "TH", "FR"];
+const compact = (iso: string) => iso.replace(/-/g, "");
+
+/**
+ * قاعدهٔ تکرار برای رویداد تقویم گوگل (فیلد recurrence در Calendar API).
+ * first = اولین نوبت (روز شروع رویداد)، time = ساعت HH:MM به وقت تهران.
+ * - روزانه و هفتگی دقیقاً به RRULE تبدیل می‌شوند (هفته از شنبه: WKST=SA).
+ * - ماهانه بر اساس ماه شمسی است و RRULE میلادی معادل ندارد؛ برای همین
+ *   نوبت‌های ۱۲ ماه آینده به‌صورت RDATE فهرست می‌شوند.
+ */
+export function toCalendarRecurrence(r: Recurrence | null | undefined, first: string, time: string): string[] {
+  if (!r) return ["RRULE:FREQ=DAILY"];
+  const n = Math.max(1, r.interval || 1);
+  const end = endDateOf(r);
+  // پایان روز آخر به وقت تهران (UTC+03:30) = ساعت 20:29:59 UTC
+  const until = end ? `;UNTIL=${compact(end)}T202959Z` : "";
+  if (r.unit === "day") return [`RRULE:FREQ=DAILY;INTERVAL=${n}${until}`];
+  if (r.unit === "week") {
+    const days = [...(r.days?.length ? r.days : [weekdayIndex(r.start)])].sort((a, b) => a - b);
+    return [`RRULE:FREQ=WEEKLY;INTERVAL=${n};WKST=SA;BYDAY=${days.map((d) => BYDAY[d]).join(",")}${until}`];
+  }
+  const hm = time.slice(0, 5).replace(":", "");
+  const dates: string[] = [];
+  let d = first;
+  for (let i = 0; i < 12; i++) {
+    const next = nextDue({ recurrence: r }, addDays(d, 1), 400);
+    if (!next) break;
+    dates.push(`${compact(next)}T${hm}00`);
+    d = next;
+  }
+  return dates.length ? [`RDATE;TZID=Asia/Tehran:${dates.join(",")}`] : [];
+}

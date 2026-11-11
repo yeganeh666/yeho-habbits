@@ -4,6 +4,7 @@ import { currentUser, serverClient } from "@/lib/supabase-server";
 import { authedClient, gfetch } from "@/lib/google";
 import { todayISO } from "@/lib/jalali";
 import { callAppsScript, isAppsScriptUrl } from "@/lib/apps-script";
+import { nextDue, toCalendarRecurrence } from "@/lib/recurrence";
 
 export const dynamic = "force-dynamic";
 const CAL = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
@@ -72,7 +73,12 @@ export async function POST(req: Request) {
   // عنوان و تاریخ هدف
   const fallbackTitle = kind === "habit" ? "عادت روزانه" : "کار روزانه";
   const rawTitle = (title || name || (row ? (kind === "habit" ? row.name : row.title) : "") || fallbackTitle).trim();
-  const targetDate = date || (row ? (kind === "habit" ? todayISO() : row.day) : todayISO()) || todayISO();
+  // عادت: رویداد از اولین نوبتِ امروز به بعد شروع می‌شود، نه لزوماً خود امروز
+  const habitFirst = kind === "habit" && row ? nextDue(row, todayISO()) : null;
+  if (kind === "habit" && row && time && !habitFirst) {
+    return NextResponse.json({ error: "این عادت نوبت آینده‌ای ندارد" }, { status: 400 });
+  }
+  const targetDate = date || (row ? (kind === "habit" ? habitFirst ?? todayISO() : row.day) : todayISO()) || todayISO();
   const oldEvId = eventId || (row ? row[col] : null);
 
   // بررسی آدرس اسکریپت تقویم کاربر: ابتدا از بدنه، سپس از کوکی، سپس از تنظیمات (فقط آدرس‌های script.google.com)
@@ -178,7 +184,8 @@ export async function POST(req: Request) {
           overrides: [{ method: "popup", minutes: eventType === "meeting" ? 10 : 0 }],
         },
       };
-      if (kind === "habit") body.recurrence = ["RRULE:FREQ=DAILY"];
+      // تکرار رویداد همان برنامهٔ عادت است (قبلاً همیشه روزانه بود)
+      if (kind === "habit") body.recurrence = toCalendarRecurrence(row?.recurrence, targetDate, hhmm(time));
 
       const ev = oldEvId
         ? await gfetch(c, `${CAL}/${oldEvId}`, { method: "PUT", body: JSON.stringify(body) }).catch(() =>
@@ -230,11 +237,11 @@ export async function POST(req: Request) {
     await updateRow(patch);
   }
 
-  const generatedEventId = `intent_${Date.now()}`;
+  // تقویم وصل نیست: رویدادی ساخته نشده، پس شناسه‌ای هم برنمی‌گردد (قبلاً شناسهٔ ساختگی intent_ ذخیره می‌شد)
   return NextResponse.json({
     ok: true,
     notConnected: true,
-    eventId: generatedEventId,
+    eventId: null,
     date: targetDate,
     time: cleanTime,
     type: eventType,
