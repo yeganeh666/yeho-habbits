@@ -4,7 +4,7 @@
 
 # Yeho Habits 
 
-**A Persian-first, installable habit tracker with Jalali calendar support, two-way Google Sheets sync, and friendly competition.**
+**A Persian-first, installable habit tracker with Jalali calendar support, Google Sheets export, and friendly competition.**
 
 [![Next.js](https://img.shields.io/badge/Next.js-14-black?logo=nextdotjs)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -31,7 +31,7 @@
   - [4. Run Locally](#4-run-locally)
 - [Deployment](#deployment)
 - [First-Time Setup in the App](#first-time-setup-in-the-app)
-- [How Google Sheets Sync Works](#how-google-sheets-sync-works)
+- [How Google Sheets Export Works](#how-google-sheets-export-works)
 - [Friends & Leaderboard](#friends--leaderboard)
 - [Security Notes](#security-notes)
 - [Scripts](#scripts)
@@ -41,7 +41,7 @@
 
 ## Overview
 
-**Yeho Habits** (عادت‌ها) is a right-to-left, Persian-language Progressive Web App for building daily routines. It uses the **Jalali (Solar Hijri) calendar** throughout, stores data in **Supabase**, and keeps your habits mirrored in a **Google Sheet** — so you can tick a habit on your phone and see it appear in your spreadsheet a second later, or edit the sheet and have the app pick it up.
+**Yeho Habits** (عادت‌ها) is a right-to-left, Persian-language Progressive Web App for building daily routines. It uses the **Jalali (Solar Hijri) calendar** throughout, stores data in **Supabase**, and can export any month's habit board to a **Google Sheet** in your Drive.
 
 ## Features
 
@@ -52,7 +52,7 @@
 | 📅 **Jalali calendar** | Native Solar Hijri dates, month names and weekdays (Saturday-first), with a custom date picker. Times default to `Asia/Tehran`. |
 | 📊 **Statistics** | Progress charts and completion trends over time. |
 | 🍅 **Pomodoro** | Built-in focus timer. |
-| 🔄 **Google Sheets sync** | Two-way sync with a monthly-tab spreadsheet layout. |
+| 📤 **Google Sheets export** | One-click, one-way export of a month's habit board to a spreadsheet in your Drive (one tab per month). |
 | 🗓️ **Google Calendar** | Push habits and to-dos as reminders or meetings — via OAuth, or via a personal Google Apps Script web app (no Cloud Console needed). |
 | 👥 **Friends** | Send friend requests by email, compare monthly rankings and view each other's habit boards. Mark any habit as hidden from friends. |
 | 📱 **PWA** | Installable on iOS/Android/desktop with a service worker and maskable icons. |
@@ -84,6 +84,7 @@
 │   │   ├── api/
 │   │   │   ├── google/      #   OAuth connect & callback
 │   │   │   ├── calendar/    #   Calendar event create/delete
+│   │   │   ├── sheets/      #   Google Sheets export
 │   │   │   └── apps-script/ #   Apps Script connection test
 │   │   ├── auth/callback/   # Supabase auth callback
 │   │   └── login/
@@ -104,12 +105,13 @@
 
 - **Node.js 20+** and **pnpm** (for local development), or **Docker** with Compose
 - A **Supabase** project (the free tier is enough)
-- A **Google Cloud** project (only needed for Sheets / Calendar sync)
+- A **Google Cloud** project (only needed for Sheets export / Calendar)
 
 ### 1. Configure Supabase
 
 1. Create a new project, open **SQL Editor**, and run the contents of [`supabase/schema.sql`](supabase/schema.sql).
 2. *(Optional — friends feature)* Run [`supabase/friends.sql`](supabase/friends.sql) afterwards.
+   > **Upgrading an existing database?** Also run the dated files in `supabase/` (e.g. `2026-11-habit-logs-ownership.sql`, `2026-11-sheets-export.sql`); `schema.sql` already includes them for new projects.
 3. Under **Authentication → Providers**, make sure **Email** is enabled.
    > For quick local testing you may disable *Confirm email*, but **keep it enabled in production** (see [Security Notes](#security-notes)).
 4. From **Project Settings → API**, copy the project **URL**, **anon key**, and **service_role key**.
@@ -117,6 +119,7 @@
 ### 2. Configure Google Cloud
 
 1. Create a project and enable the **Google Sheets API** and **Google Calendar API**.
+   The app requests `calendar.events` and `drive.file` (access only to files the app creates).
 2. Configure the **OAuth consent screen** as *External* and set its publishing status to **In production**.
    > In *Testing* mode, refresh tokens expire after 7 days. The "unverified app" warning is fine for personal use.
 3. Go to **Credentials → Create credentials → OAuth client ID → Web application** and add these **Authorized redirect URIs**:
@@ -176,18 +179,17 @@ Use the provided `Dockerfile` / `docker-compose.yml` behind any reverse proxy (N
 ## First-Time Setup in the App
 
 1. Sign up / sign in with your email.
-2. Go to **Settings → Connect to Google** and authorize access.
-3. Paste your **spreadsheet link** and a **tab prefix** (e.g. your name), then save.
-4. Click **Sync now** — habits found in the current month's tab are imported into the app.
+2. Go to **Settings → Google Sheets export → Connect Google account** and authorize access.
+3. Click a month to export it. The first export creates a spreadsheet in your Drive; later exports reuse it.
 
-## How Google Sheets Sync Works
+## How Google Sheets Export Works
 
-- **App → Sheet:** a check-off is saved to the database instantly and written to the sheet cell about **1 second** later.
-- **Sheet → App:** the sheet is polled **every minute** (and whenever the app regains focus) and changes are merged.
-- **Conflicts:** a change made in the app that hasn't reached the sheet yet **wins**.
-- **New month:** if the month's tab doesn't exist, it's created by copying the latest tab; the *daily goal* row (row 34) is converted to a `COUNTA` formula instead of a hard-coded number.
-- **Day 31:** the sheet layout has 30 day columns, so day 31 is stored in the app only.
-- **Archiving:** archived habits are **not** removed from the sheet, preserving history.
+- **One-way:** the database is the only source of truth. Exporting writes the month's board to the sheet; edits made in the sheet are **not** read back.
+- **Layout:** one tab per Jalali month (e.g. `آبان ۱۴۰۵`), one row per habit, one column per day: `✓` done, empty = due but not done, `–` = not scheduled that day. The last columns show done count, target and percentage.
+- **Re-exporting** a month clears and rewrites that tab, so it always matches the app.
+- **Archived habits** appear only in months where they have check-offs.
+- If you delete the spreadsheet, the next export creates a new one.
+- Accounts connected before the export existed must click **Reconnect Google account** once, to grant the new `drive.file` permission.
 
 ## Friends & Leaderboard
 

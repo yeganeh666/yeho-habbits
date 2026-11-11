@@ -51,4 +51,5 @@ export type Settings = {
   script_url?: string | null;
   google_email: string | null;
   calendar_connected?: boolean;
+  export_spreadsheet_id?: string | null;
 };
