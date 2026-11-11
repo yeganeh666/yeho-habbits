@@ -6,7 +6,8 @@ import { isValidSupabaseKey, isValidSupabaseUrl } from "./supabase-config";
 export function getServerSupabaseConfig() {
   const url = (process.env.NEXT_PUBLIC_SUPABASE_URL || "").trim();
   const anonKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "").trim();
-  const serviceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim() || anonKey;
+  // No fallback to the anon key: admin calls must fail loudly when the service-role key is missing.
+  const serviceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
 
   const isConfigured = isValidSupabaseUrl(url) && isValidSupabaseKey(anonKey);
 
@@ -36,7 +37,9 @@ export function serverClient() {
 export function adminClient() {
   const { url, serviceKey, isConfigured } = getServerSupabaseConfig();
 
-  if (!isConfigured || !serviceKey) {
+  if (!isConfigured) return null;
+  if (!isValidSupabaseKey(serviceKey)) {
+    console.error("SUPABASE_SERVICE_ROLE_KEY is not set; Google connection features are disabled.");
     return null;
   }
 
