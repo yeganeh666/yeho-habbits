@@ -1,46 +1,223 @@
-# عادت‌ها — ردیاب عادت با همگام‌سازی گوگل شیت (PWA)
+<div align="center">
 
-Next.js 14 + Supabase + Docker Compose / Vercel
+<img src="public/icons/icon-192.png" alt="Yeho Habits logo" width="96" height="96" />
 
-## راه‌اندازی (۴ مرحله)
+# Yeho Habits 
 
-### ۱. Supabase
-1. پروژه بسازید ← SQL Editor ← محتوای `supabase/schema.sql` را اجرا کنید.
-2. Authentication ← Providers ← Email روشن باشد (برای شروع می‌توانید «Confirm email» را خاموش کنید).
-3. مقادیر `URL`, `anon key`, `service_role key` را از Project Settings ← API بردارید.
+**A Persian-first, installable habit tracker with Jalali calendar support, two-way Google Sheets sync, and friendly competition.**
 
-### ۲. Google Cloud (برای شیت و تقویم)
-1. پروژه بسازید و این دو API را Enable کنید: **Google Sheets API** و **Google Calendar API**.
-2. OAuth consent screen: نوع External؛ **Publishing status را «In production» بگذارید** (وگرنه رفرش‌توکن بعد از ۷ روز منقضی می‌شود؛ هشدار «unverified» برای استفادهٔ شخصی مشکلی ندارد).
-3. Credentials ← OAuth client ID ← Web application. در Authorized redirect URIs اضافه کنید:
-   - `http://localhost:3000/api/google/callback`
-   - `https://<دامنه‌ی-vercel-شما>/api/google/callback`
+[![Next.js](https://img.shields.io/badge/Next.js-14-black?logo=nextdotjs)](https://nextjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Supabase](https://img.shields.io/badge/Supabase-Auth%20%26%20Postgres-3ECF8E?logo=supabase&logoColor=white)](https://supabase.com/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
+[![PWA](https://img.shields.io/badge/PWA-installable-5A0FC8?logo=pwa&logoColor=white)](#)
+[![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](#-run-with-docker-compose)
 
-### ۳. اجرا با Docker Compose
+</div>
+
+---
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Features](#features)
+- [Tech Stack](#tech-stack)
+- [Project Structure](#project-structure)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [1. Configure Supabase](#1-configure-supabase)
+  - [2. Configure Google Cloud](#2-configure-google-cloud)
+  - [3. Environment Variables](#3-environment-variables)
+  - [4. Run Locally](#4-run-locally)
+- [Deployment](#deployment)
+- [First-Time Setup in the App](#first-time-setup-in-the-app)
+- [How Google Sheets Sync Works](#how-google-sheets-sync-works)
+- [Friends & Leaderboard](#friends--leaderboard)
+- [Security Notes](#security-notes)
+- [Scripts](#scripts)
+- [Contributing](#contributing)
+
+---
+
+## Overview
+
+**Yeho Habits** (عادت‌ها) is a right-to-left, Persian-language Progressive Web App for building daily routines. It uses the **Jalali (Solar Hijri) calendar** throughout, stores data in **Supabase**, and keeps your habits mirrored in a **Google Sheet** — so you can tick a habit on your phone and see it appear in your spreadsheet a second later, or edit the sheet and have the app pick it up.
+
+## Features
+
+| Area | What you get |
+| --- | --- |
+| ✅ **Habits** | Daily check-offs with flexible, Google-Calendar-style recurrence (every *N* days / weeks / months, specific weekdays, end date or occurrence count). Archive habits without losing history. |
+| 📝 **To-dos** | A lightweight task list alongside your habits. |
+| 📅 **Jalali calendar** | Native Solar Hijri dates, month names and weekdays (Saturday-first), with a custom date picker. Times default to `Asia/Tehran`. |
+| 📊 **Statistics** | Progress charts and completion trends over time. |
+| 🍅 **Pomodoro** | Built-in focus timer. |
+| 🔄 **Google Sheets sync** | Two-way sync with a monthly-tab spreadsheet layout. |
+| 🗓️ **Google Calendar** | Push habits and to-dos as reminders or meetings — via OAuth, or via a personal Google Apps Script web app (no Cloud Console needed). |
+| 👥 **Friends** | Send friend requests by email, compare monthly rankings and view each other's habit boards. Mark any habit as hidden from friends. |
+| 📱 **PWA** | Installable on iOS/Android/desktop with a service worker and maskable icons. |
+
+## Tech Stack
+
+- **Framework:** [Next.js 14](https://nextjs.org/) (App Router) + React 18 + TypeScript
+- **Styling:** Tailwind CSS, [Vazirmatn](https://github.com/rastikerdar/vazirmatn) variable font
+- **Backend:** [Supabase](https://supabase.com/) — Postgres, Auth, Row Level Security
+- **Integrations:** Google Sheets API, Google Calendar API (`google-auth-library`), Google Apps Script
+- **Dates:** [`jalaali-js`](https://github.com/jalaali/jalaali-js)
+- **Deployment:** Docker / Docker Compose or Vercel
+
+## Project Structure
+
+```
+.
+├── public/                  # PWA manifest, service worker, icons
+├── src/
+│   ├── app/
+│   │   ├── (app)/           # Authenticated pages
+│   │   │   ├── page.tsx     #   Today / dashboard
+│   │   │   ├── habits/      #   Habit management
+│   │   │   ├── todos/       #   To-do list
+│   │   │   ├── stats/       #   Charts & statistics
+│   │   │   ├── pomodoro/    #   Focus timer
+│   │   │   ├── friends/     #   Friends & leaderboard
+│   │   │   └── settings/    #   Google connection, preferences
+│   │   ├── api/
+│   │   │   ├── google/      #   OAuth connect & callback
+│   │   │   ├── calendar/    #   Calendar event create/delete
+│   │   │   └── apps-script/ #   Apps Script connection test
+│   │   ├── auth/callback/   # Supabase auth callback
+│   │   └── login/
+│   ├── components/          # UI, charts, recurrence editor, calendar picker…
+│   ├── lib/                 # Supabase clients, Google helpers, Jalali & recurrence logic
+│   └── middleware.ts        # Session / route protection
+├── supabase/
+│   ├── schema.sql           # Core tables & policies
+│   └── friends.sql          # Friends feature (run after schema.sql)
+├── Dockerfile
+├── docker-compose.yml
+└── .env.example
+```
+
+## Getting Started
+
+### Prerequisites
+
+- **Node.js 20+** and **pnpm** (for local development), or **Docker** with Compose
+- A **Supabase** project (the free tier is enough)
+- A **Google Cloud** project (only needed for Sheets / Calendar sync)
+
+### 1. Configure Supabase
+
+1. Create a new project, open **SQL Editor**, and run the contents of [`supabase/schema.sql`](supabase/schema.sql).
+2. *(Optional — friends feature)* Run [`supabase/friends.sql`](supabase/friends.sql) afterwards.
+3. Under **Authentication → Providers**, make sure **Email** is enabled.
+   > For quick local testing you may disable *Confirm email*, but **keep it enabled in production** (see [Security Notes](#security-notes)).
+4. From **Project Settings → API**, copy the project **URL**, **anon key**, and **service_role key**.
+
+### 2. Configure Google Cloud
+
+1. Create a project and enable the **Google Sheets API** and **Google Calendar API**.
+2. Configure the **OAuth consent screen** as *External* and set its publishing status to **In production**.
+   > In *Testing* mode, refresh tokens expire after 7 days. The "unverified app" warning is fine for personal use.
+3. Go to **Credentials → Create credentials → OAuth client ID → Web application** and add these **Authorized redirect URIs**:
+   ```
+   http://localhost:3000/api/google/callback
+   https://<your-domain>/api/google/callback
+   ```
+
+> **Calendar only?** You can skip OAuth for calendar features entirely: the Settings page provides a ready-made Google Apps Script you deploy as a web app and paste the URL into the app.
+
+### 3. Environment Variables
+
 ```bash
-cp .env.example .env     # مقادیر را پر کنید
+cp .env.example .env
+```
+
+| Variable | Description |
+| --- | --- |
+| `APP_URL` | Public base URL of the app (e.g. `http://localhost:3000` or `https://your-domain.com`) |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon (public) key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service-role key — **server-side only, never expose** |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
+
+### 4. Run Locally
+
+**With pnpm**
+
+```bash
+pnpm install
+pnpm dev
+# → http://localhost:3000
+```
+
+**With Docker Compose**
+
+```bash
 docker compose up -d --build
 # → http://localhost:3000
 ```
 
-### ۴. دیپلوی روی Vercel
-Import همین ریپو ← Environment Variables همان ۶ متغیر `.env` (با `APP_URL=https://دامنه‌ی-شما`) ← Deploy.
+The container runs with `TZ=Asia/Tehran` and includes a health check against `/login`.
 
-## بعد از اولین ورود
-تنظیمات ← «اتصال به گوگل» ← لینک شیت و پیشوند تب (مثلاً `حسین`) را ذخیره کنید ← «همگام‌سازی الان».
-عادت‌های موجود در تب ماه جاری به اپ وارد می‌شوند.
+## Deployment
 
-## قابلیت دوستان و رقابت
-۱. بعد از `schema.sql`، فایل `supabase/friends.sql` را هم در SQL Editor اجرا کنید.
-۲. در بخش «دوستان» ایمیل دوستتان را وارد کنید تا درخواست برایش ارسال شود؛ او با همان ایمیل وارد اپ می‌شود و می‌پذیرد.
-۳. بعد از پذیرش، رده‌بندی ماه و جدول عادت‌های هم را می‌بینید. هر عادت را می‌شود از فرم ویرایش «پنهان از دوستان» کرد.
+### Vercel
 
-نکات امنیتی: اپ هرگز نشان نمی‌دهد یک ایمیل ثبت‌نام کرده یا نه؛ اطلاعات فقط بعد از پذیرش دوستی و از طریق تابع امن `friend_board` خوانده می‌شود. برای اطمینان از اینکه کسی با ایمیل دیگران ثبت‌نام نکند، در Supabase گزینهٔ **Confirm email** را روشن کنید.
+1. Import this repository into Vercel.
+2. Add the six environment variables above, setting `APP_URL=https://<your-domain>`.
+3. Deploy, then add `https://<your-domain>/api/google/callback` to your Google OAuth redirect URIs.
 
-## همگام‌سازی چطور کار می‌کند
-- تیک در اپ ← فوراً در دیتابیس ذخیره، حدود ۱ ثانیه بعد در سلول شیت نوشته می‌شود.
-- شیت ← اپ: هر ۱ دقیقه (و هنگام برگشتن به اپ) شیت خوانده و مقایسه می‌شود.
-- تعارض: تغییری که در اپ هنوز به شیت نرسیده، برنده است.
-- تب ماه جدید: اگر وجود نداشت از آخرین تب کپی ساخته می‌شود و «هدف روزانه» (ردیف ۳۴) به‌جای عدد دستی فرمول `COUNTA` می‌گیرد.
-- شیت فقط ۳۰ ستون روز دارد؛ روز ۳۱ فقط در اپ می‌ماند.
-- عادت بایگانی‌شده از شیت حذف نمی‌شود (تاریخچه حفظ می‌شود).
+### Self-hosted (Docker)
+
+Use the provided `Dockerfile` / `docker-compose.yml` behind any reverse proxy (Nginx, Caddy, Traefik) with HTTPS. Note that `NEXT_PUBLIC_*` variables are passed as **build args**, so rebuild the image after changing them.
+
+## First-Time Setup in the App
+
+1. Sign up / sign in with your email.
+2. Go to **Settings → Connect to Google** and authorize access.
+3. Paste your **spreadsheet link** and a **tab prefix** (e.g. your name), then save.
+4. Click **Sync now** — habits found in the current month's tab are imported into the app.
+
+## How Google Sheets Sync Works
+
+- **App → Sheet:** a check-off is saved to the database instantly and written to the sheet cell about **1 second** later.
+- **Sheet → App:** the sheet is polled **every minute** (and whenever the app regains focus) and changes are merged.
+- **Conflicts:** a change made in the app that hasn't reached the sheet yet **wins**.
+- **New month:** if the month's tab doesn't exist, it's created by copying the latest tab; the *daily goal* row (row 34) is converted to a `COUNTA` formula instead of a hard-coded number.
+- **Day 31:** the sheet layout has 30 day columns, so day 31 is stored in the app only.
+- **Archiving:** archived habits are **not** removed from the sheet, preserving history.
+
+## Friends & Leaderboard
+
+1. Make sure `supabase/friends.sql` has been applied.
+2. On the **Friends** page, enter a friend's email to send a request. They sign in with that same email and accept it.
+3. Once accepted, you both see the monthly ranking and each other's habit boards.
+4. Any habit can be marked **Hidden from friends** in its edit form.
+
+## Security Notes
+
+- The app never reveals whether an email address is registered.
+- Friend data is only readable after a request is accepted, through the secured `friend_board` database function.
+- Enable **Confirm email** in Supabase in production so nobody can register with someone else's address.
+- `SUPABASE_SERVICE_ROLE_KEY` and `GOOGLE_CLIENT_SECRET` are server-only secrets — never commit `.env`.
+
+## Scripts
+
+| Command | Description |
+| --- | --- |
+| `pnpm dev` | Start the dev server on `0.0.0.0:3000` |
+| `pnpm build` | Production build |
+| `pnpm start` | Run the production build |
+| `pnpm lint` | Type-check with `tsc --noEmit` |
+
+## Contributing
+
+Issues and pull requests are welcome. Before submitting a PR, please run `pnpm lint` and make sure the app builds with `pnpm build`.
+
+---
+
+<div align="center">
+Made with ❤️ for building better days, one habit at a time.
+</div>
