@@ -206,3 +206,33 @@ export function toCalendarRecurrence(r: Recurrence | null | undefined, first: st
   }
   return dates.length ? [`RDATE;TZID=Asia/Tehran:${dates.join(",")}`] : [];
 }
+
+/** نام روزهای هفته در CalendarApp.Weekday به ترتیب این اپ (۰ = شنبه) */
+const SCRIPT_WEEKDAYS = ["SATURDAY", "SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"];
+
+/** توصیف تکرار برای Apps Script (CalendarApp.newRecurrence)؛ RRULE پشتیبانی نمی‌شود */
+export type ScriptRepeat =
+  | { freq: "daily"; interval: number; until?: string }
+  | { freq: "weekly"; interval: number; weekdays: string[]; until?: string }
+  /** ماهانهٔ شمسی: فهرست تاریخ‌ها؛ اسکریپت برای هر کدام یک رویداد می‌سازد */
+  | { freq: "dates"; dates: string[] };
+
+export function toScriptRepeat(r: Recurrence | null | undefined, first: string): ScriptRepeat {
+  if (!r) return { freq: "daily", interval: 1 };
+  const n = Math.max(1, r.interval || 1);
+  const until = endDateOf(r) ?? undefined;
+  if (r.unit === "day") return { freq: "daily", interval: n, until };
+  if (r.unit === "week") {
+    const days = [...(r.days?.length ? r.days : [weekdayIndex(r.start)])].sort((a, b) => a - b);
+    return { freq: "weekly", interval: n, weekdays: days.map((d) => SCRIPT_WEEKDAYS[d]), until };
+  }
+  const dates = [first];
+  let d = first;
+  for (let i = 0; i < 11; i++) {
+    const next = nextDue({ recurrence: r }, addDays(d, 1), 400);
+    if (!next) break;
+    dates.push(next);
+    d = next;
+  }
+  return { freq: "dates", dates };
+}

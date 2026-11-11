@@ -4,7 +4,7 @@ import { currentUser, serverClient } from "@/lib/supabase-server";
 import { authedClient, gfetch } from "@/lib/google";
 import { todayISO } from "@/lib/jalali";
 import { callAppsScript, isAppsScriptUrl } from "@/lib/apps-script";
-import { nextDue, toCalendarRecurrence } from "@/lib/recurrence";
+import { nextDue, toCalendarRecurrence, toScriptRepeat } from "@/lib/recurrence";
 
 export const dynamic = "force-dynamic";
 const CAL = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
@@ -140,6 +140,8 @@ export async function POST(req: Request) {
         durationMinutes: duration,
         oldEventId: oldEvId,
         description: desc,
+        // عادت‌ها تکرار می‌شوند (همان برنامهٔ عادت)؛ کارها یک‌باره‌اند
+        repeat: kind === "habit" ? toScriptRepeat(row?.recurrence, targetDate) : null,
       });
 
       if (!res.ok) {
@@ -164,6 +166,8 @@ export async function POST(req: Request) {
         type: eventType,
         durationMinutes: duration,
         method: "apps_script",
+        // اسکریپت قدیمی فیلد repeat را نادیده می‌گیرد و فقط یک رویداد می‌سازد
+        oldScript: kind === "habit" && res.repeated !== true,
       });
     } catch (e: any) {
       return NextResponse.json({ error: String(e?.message ?? e).slice(0, 300) }, { status: 500 });

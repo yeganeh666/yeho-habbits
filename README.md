@@ -32,6 +32,7 @@
 - [Deployment](#deployment)
 - [First-Time Setup in the App](#first-time-setup-in-the-app)
 - [How Google Sheets Export Works](#how-google-sheets-export-works)
+- [Habit Reminders in Google Calendar](#habit-reminders-in-google-calendar)
 - [Friends & Leaderboard](#friends--leaderboard)
 - [Security Notes](#security-notes)
 - [Scripts](#scripts)
@@ -62,7 +63,7 @@
 - **Framework:** [Next.js 14](https://nextjs.org/) (App Router) + React 18 + TypeScript
 - **Styling:** Tailwind CSS, [Vazirmatn](https://github.com/rastikerdar/vazirmatn) variable font
 - **Backend:** [Supabase](https://supabase.com/) — Postgres, Auth, Row Level Security
-- **Integrations:** Google Sheets API, Google Calendar API (`google-auth-library`), Google Apps Script
+- **Integrations:** Google Apps Script (calendar + Sheets export, no Cloud project needed); optional Google Calendar API via OAuth (`google-auth-library`)
 - **Dates:** [`jalaali-js`](https://github.com/jalaali/jalaali-js)
 - **Deployment:** Docker / Docker Compose or Vercel
 
@@ -189,6 +190,20 @@ Use the provided `Dockerfile` / `docker-compose.yml` behind any reverse proxy (N
 - **Archived habits** appear only in months where they have check-offs.
 - If you delete the spreadsheet, the next export creates a new one.
 - The export runs through **your own Apps Script** (no Google Cloud project, no OAuth). If you installed the script before the export existed, paste the new code and redeploy with **Manage deployments → Edit → Version: New version**; the URL stays the same and Google will ask once for spreadsheet access.
+
+## Habit Reminders in Google Calendar
+
+A habit's reminder repeats on the habit's own schedule, with either connection:
+
+| Habit schedule | Apps Script | OAuth |
+| --- | --- | --- |
+| Every *N* days | repeating event, `interval = N` | `RRULE:FREQ=DAILY;INTERVAL=N` |
+| Weekly on chosen days (every *N* weeks) | repeating event on those weekdays | `RRULE:FREQ=WEEKLY;…;BYDAY=…` |
+| End date / after *N* times | series ends on the last due day | `UNTIL=` the last due day |
+| Monthly (Jalali) | one event per date for the next 12 occurrences | `RDATE` list for the next 12 occurrences |
+| No schedule (older habits) | daily | daily |
+
+Notes: monthly habits follow Jalali months, which no Gregorian rule can express, so those reminders cover 12 months and are refreshed whenever you re-save the habit's reminder time. Apps Script can't set the week start, so *every 2+ weeks* may line up one week differently from the app. Changing a habit's schedule does not update its existing reminder until you save the reminder time again. Old Apps Script deployments create a single event; the app tells you when that happens, and you fix it by pasting the new script and choosing **New version**.
 
 ## Friends & Leaderboard
 

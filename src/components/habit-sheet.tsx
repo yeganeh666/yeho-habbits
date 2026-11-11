@@ -49,6 +49,7 @@ export function HabitSheet({ open, onClose, habit, month, defaultStart, presetNa
         toast("یادآور در تقویم ساخته نشد؛ اتصال تقویم را در تنظیمات بررسی کنید");
       } else {
         const j = await r.json().catch(() => ({}));
+        if (j.oldScript) toast("برای تکرار یادآور، کد جدید اسکریپت گوگل را از تنظیمات کپی و دوباره Deploy کنید");
         await sb().from("habits").update({
           reminder_time: time || null,
           reminder_event_id: time ? (j.eventId || habit.reminder_event_id) : null,
