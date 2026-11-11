@@ -3,8 +3,6 @@ import { adminClient } from "./supabase-server";
 
 export const SCOPES = [
   "https://www.googleapis.com/auth/calendar.events",
-  // فقط فایل‌هایی که خود اپ می‌سازد (خروجی Google Sheets)؛ دسترسی به بقیهٔ Drive ندارد
-  "https://www.googleapis.com/auth/drive.file",
   "openid", "email",
 ];
 export const oauthClient = () =>

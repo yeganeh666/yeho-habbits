@@ -83,7 +83,6 @@ create table if not exists user_settings (
   google_email text,
   last_sync_at timestamptz
 );
-alter table user_settings add column if not exists export_spreadsheet_id text;
 
 create table if not exists google_tokens (
   user_id uuid primary key references auth.users(id) on delete cascade,
@@ -243,7 +242,7 @@ export default function SettingsPage() {
       const res = await fetch("/api/sheets/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jy, jm }),
+        body: JSON.stringify({ jy, jm, scriptUrl: scriptUrl.trim() || getLocalScriptUrl() }),
       }).then((x) => x.json());
       if (res.ok) {
         setExportUrl(res.url);
@@ -448,17 +447,10 @@ export default function SettingsPage() {
           جدول عادت‌های یک ماه در یک فایل Google Sheets در Drive شما نوشته می‌شود. هر بار خروجی، برگهٔ همان ماه از نو ساخته می‌شود؛
           تغییراتی که در شیت بدهید به اپ برنمی‌گردد.
         </p>
-        <div className="mb-3 flex items-center justify-between rounded-2xl bg-soft/50 p-3 text-xs">
-          <span className="text-mute">حساب گوگل:</span>
-          {st?.google_email ? (
-            <span dir="ltr" className="font-bold text-ink">{st.google_email}</span>
-          ) : (
-            <span className="font-bold text-mute">وصل نشده</span>
-          )}
-        </div>
-        <a href="/api/google/connect" className={`${btnGhost} mb-3 block w-full text-center text-sm`}>
-          {st?.google_email ? "اتصال دوبارهٔ حساب گوگل" : "اتصال حساب گوگل"}
-        </a>
+        <p className="mb-3 rounded-2xl bg-soft/50 p-3 text-xs leading-6 text-mute">
+          از همان اسکریپت گوگلِ بخش تقویم استفاده می‌شود (بدون Google Cloud). اگر اسکریپت را قبلاً نصب کرده‌اید، یک‌بار کد جدید را کپی کنید
+          و در Apps Script با <b>Deploy ← Manage deployments ← Edit ← New version</b> به‌روز کنید؛ آدرس آن عوض نمی‌شود.
+        </p>
         {(() => {
           const now = fromISO(todayISO());
           const prev = shiftMonth(now.jy, now.jm, -1);
@@ -469,7 +461,7 @@ export default function SettingsPage() {
                   key={`${m.jy}-${m.jm}`}
                   type="button"
                   className={`${btnPrimary} text-sm`}
-                  disabled={!st?.google_email || exporting !== null}
+                  disabled={!scriptUrl.trim() || exporting !== null}
                   onClick={() => exportMonth(m.jy, m.jm)}
                 >
                   {exporting === `${m.jy}-${m.jm}` ? "در حال نوشتن…" : `${MONTHS[m.jm - 1]} ${fa(m.jy)}`}

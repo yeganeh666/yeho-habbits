@@ -105,21 +105,20 @@
 
 - **Node.js 20+** and **pnpm** (for local development), or **Docker** with Compose
 - A **Supabase** project (the free tier is enough)
-- A **Google Cloud** project (only needed for Sheets export / Calendar)
+- *(Optional)* A **Google Cloud** project — only for Calendar via OAuth. Not needed if you use the Apps Script option (recommended).
 
 ### 1. Configure Supabase
 
 1. Create a new project, open **SQL Editor**, and run the contents of [`supabase/schema.sql`](supabase/schema.sql).
 2. *(Optional — friends feature)* Run [`supabase/friends.sql`](supabase/friends.sql) afterwards.
-   > **Upgrading an existing database?** Also run the dated files in `supabase/` (e.g. `2026-11-habit-logs-ownership.sql`, `2026-11-sheets-export.sql`); `schema.sql` already includes them for new projects.
+   > **Upgrading an existing database?** Also run the dated files in `supabase/` (e.g. `2026-11-habit-logs-ownership.sql`); `schema.sql` already includes them for new projects.
 3. Under **Authentication → Providers**, make sure **Email** is enabled.
    > For quick local testing you may disable *Confirm email*, but **keep it enabled in production** (see [Security Notes](#security-notes)).
 4. From **Project Settings → API**, copy the project **URL**, **anon key**, and **service_role key**.
 
 ### 2. Configure Google Cloud
 
-1. Create a project and enable the **Google Sheets API** and **Google Calendar API**.
-   The app requests `calendar.events` and `drive.file` (access only to files the app creates).
+1. Create a project and enable the **Google Calendar API**.
 2. Configure the **OAuth consent screen** as *External* and set its publishing status to **In production**.
    > In *Testing* mode, refresh tokens expire after 7 days. The "unverified app" warning is fine for personal use.
 3. Go to **Credentials → Create credentials → OAuth client ID → Web application** and add these **Authorized redirect URIs**:
@@ -128,7 +127,7 @@
    https://<your-domain>/api/google/callback
    ```
 
-> **Calendar only?** You can skip OAuth for calendar features entirely: the Settings page provides a ready-made Google Apps Script you deploy as a web app and paste the URL into the app.
+> **No Google Cloud?** You can skip this step entirely. The Settings page provides a ready-made Google Apps Script you deploy as a web app from your own Google account and paste into the app; it handles both **calendar reminders** and the **Google Sheets export**.
 
 ### 3. Environment Variables
 
@@ -179,8 +178,8 @@ Use the provided `Dockerfile` / `docker-compose.yml` behind any reverse proxy (N
 ## First-Time Setup in the App
 
 1. Sign up / sign in with your email.
-2. Go to **Settings → Google Sheets export → Connect Google account** and authorize access.
-3. Click a month to export it. The first export creates a spreadsheet in your Drive; later exports reuse it.
+2. In **Settings → Google Calendar**, copy the Apps Script code, deploy it at [script.new](https://script.new) as a web app (*Execute as: Me*, *Who has access: Anyone*), and paste the `/exec` URL into the app.
+3. In **Settings → Google Sheets export**, click a month to export it. The first export creates a spreadsheet in your Drive; later exports reuse it.
 
 ## How Google Sheets Export Works
 
@@ -189,7 +188,7 @@ Use the provided `Dockerfile` / `docker-compose.yml` behind any reverse proxy (N
 - **Re-exporting** a month clears and rewrites that tab, so it always matches the app.
 - **Archived habits** appear only in months where they have check-offs.
 - If you delete the spreadsheet, the next export creates a new one.
-- Accounts connected before the export existed must click **Reconnect Google account** once, to grant the new `drive.file` permission.
+- The export runs through **your own Apps Script** (no Google Cloud project, no OAuth). If you installed the script before the export existed, paste the new code and redeploy with **Manage deployments → Edit → Version: New version**; the URL stays the same and Google will ask once for spreadsheet access.
 
 ## Friends & Leaderboard
 

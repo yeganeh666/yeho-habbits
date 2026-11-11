@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { currentUser, serverClient } from "@/lib/supabase-server";
-import { authedClient, gfetch } from "@/lib/google";
+import { callAppsScript, isAppsScriptUrl } from "@/lib/apps-script";
 import { fa, monthLength, monthRange, MONTHS, toISO } from "@/lib/jalali";
 import { dueCount, isDue, type Recurrence } from "@/lib/recurrence";
 
@@ -18,8 +18,9 @@ type HabitRow = {
 };
 
 /**
- * POST { jy, jm }
- * خروجی یک‌طرفهٔ یک ماه شمسی به Google Sheets (ADR-001، گزینهٔ B).
+ * POST { jy, jm, scriptUrl? }
+ * خروجی یک‌طرفهٔ یک ماه شمسی به Google Sheets (ADR-001، گزینهٔ B) از طریق
+ * همان Apps Script کاربر — بدون نیاز به Google Cloud Console یا OAuth.
  * پایگاه داده تنها منبع داده است: هر بار برگهٔ آن ماه از نو نوشته می‌شود و
  * تغییرات داخل شیت به اپ برنمی‌گردد.
  */
@@ -41,11 +42,6 @@ export async function POST(req: Request) {
   const db = serverClient();
   if (!db) return NextResponse.json({ error: "not_configured" }, { status: 500 });
 
-  const google = await authedClient(user.id).catch(() => null);
-  if (!google) {
-    return NextResponse.json({ error: "not_connected", message: "ابتدا حساب گوگل را از همین بخش وصل کنید" }, { status: 400 });
-  }
-
   // ---------- داده‌های ماه (با RLS، فقط داده‌های خود کاربر) ----------
   const { start, end } = monthRange(jy, jm);
   const len = monthLength(jy, jm);
@@ -53,13 +49,17 @@ export async function POST(req: Request) {
   const [hRes, tRes, sRes] = await Promise.all([
     db.from("habits").select("id,name,archived,monthly_target,recurrence,created_at").order("sort").order("created_at"),
     db.from("habit_targets").select("habit_id,target").eq("jy", jy).eq("jm", jm),
-    db.from("user_settings").select("export_spreadsheet_id").eq("user_id", user.id).maybeSingle(),
+    db.from("user_settings").select("script_url").eq("user_id", user.id).maybeSingle(),
   ]);
   if (hRes.error) return NextResponse.json({ error: hRes.error.message }, { status: 500 });
-  if (sRes.error && sRes.error.message.includes("export_spreadsheet_id")) {
+
+  // آدرس اسکریپت: از بدنه (ذخیره‌شده در مرورگر) یا تنظیمات؛ فقط script.google.com
+  const fromBody = typeof body.scriptUrl === "string" ? body.scriptUrl.trim() : "";
+  const scriptUrl = [fromBody, sRes.data?.script_url ?? ""].find((u) => isAppsScriptUrl(u)) ?? "";
+  if (!scriptUrl) {
     return NextResponse.json(
-      { error: "schema", message: "ابتدا فایل supabase/2026-11-sheets-export.sql را در Supabase اجرا کنید" },
-      { status: 500 }
+      { error: "not_connected", message: "ابتدا آدرس اسکریپت گوگل را در بخش تقویم همین صفحه ذخیره کنید" },
+      { status: 400 }
     );
   }
 
@@ -100,86 +100,24 @@ export async function POST(req: Request) {
   const tab = `${MONTHS[jm - 1]} ${fa(jy)}`;
 
   try {
-    // ---------- فایل و برگهٔ ماه ----------
-    let spreadsheetId: string | null = sRes.data?.export_spreadsheet_id ?? null;
-    let sheetId: number | null = null;
-
-    if (spreadsheetId) {
-      const meta = await gfetch(google, `${SHEETS}/${spreadsheetId}?fields=sheets.properties(sheetId,title)`).catch(
-        (e: Error) => {
-          // فایل حذف شده یا دیگر در دسترس نیست → فایل تازه ساخته می‌شود
-          if (/Google (403|404)/.test(e.message)) return null;
-          throw e;
-        }
-      );
-      if (!meta) spreadsheetId = null;
-      else sheetId = meta.sheets?.find((s: any) => s.properties?.title === tab)?.properties?.sheetId ?? null;
-    }
-
-    if (!spreadsheetId) {
-      const created = await gfetch(google, SHEETS, {
-        method: "POST",
-        body: JSON.stringify({
-          properties: { title: "Yeho Habits — خروجی عادت‌ها", locale: "fa_IR", timeZone: "Asia/Tehran" },
-          sheets: [{ properties: { title: tab, rightToLeft: true } }],
-        }),
-      });
-      spreadsheetId = created.spreadsheetId as string;
-      sheetId = created.sheets?.[0]?.properties?.sheetId ?? 0;
-      await db.from("user_settings").upsert({ user_id: user.id, export_spreadsheet_id: spreadsheetId }, { onConflict: "user_id" });
-    } else if (sheetId === null) {
-      const added = await gfetch(google, `${SHEETS}/${spreadsheetId}:batchUpdate`, {
-        method: "POST",
-        body: JSON.stringify({ requests: [{ addSheet: { properties: { title: tab, rightToLeft: true } } }] }),
-      });
-      sheetId = added.replies?.[0]?.addSheet?.properties?.sheetId ?? null;
-    } else {
-      await gfetch(google, `${SHEETS}/${spreadsheetId}/values/${encodeURIComponent(`'${tab}'`)}:clear`, { method: "POST", body: "{}" });
-    }
-
-    // ---------- نوشتن ----------
-    await gfetch(
-      google,
-      `${SHEETS}/${spreadsheetId}/values/${encodeURIComponent(`'${tab}'!A1`)}?valueInputOption=RAW`,
-      { method: "PUT", body: JSON.stringify({ values }) }
-    );
-    if (sheetId !== null) {
-      await gfetch(google, `${SHEETS}/${spreadsheetId}:batchUpdate`, {
-        method: "POST",
-        body: JSON.stringify({
-          requests: [
-            {
-              updateSheetProperties: {
-                properties: { sheetId, gridProperties: { frozenRowCount: 1, frozenColumnCount: 1 } },
-                fields: "gridProperties.frozenRowCount,gridProperties.frozenColumnCount",
-              },
-            },
-            {
-              repeatCell: {
-                range: { sheetId, startRowIndex: 0, endRowIndex: 1 },
-                cell: { userEnteredFormat: { textFormat: { bold: true } } },
-                fields: "userEnteredFormat.textFormat.bold",
-              },
-            },
-          ],
-        }),
-      }).catch(() => null); // قالب‌بندی اختیاری است؛ خطای آن نباید خروجی را خراب کند
-    }
-
-    return NextResponse.json({
-      ok: true,
-      habits: habits.length,
-      url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit${sheetId !== null ? `#gid=${sheetId}` : ""}`,
+    const res = await callAppsScript(scriptUrl, "sheets_export", {
+      title: "Yeho Habits — خروجی عادت‌ها",
+      tab,
+      values,
     });
-  } catch (e: any) {
-    const msg = String(e?.message ?? e);
-    if (/Google (401|403)/.test(msg)) {
-      // توکن‌های قدیمی فقط دسترسی تقویم دارند؛ باید یک‌بار دوباره وصل شوند
-      return NextResponse.json(
-        { error: "reconnect", message: "دسترسی گوگل کافی نیست؛ یک‌بار دیگر حساب گوگل را وصل کنید" },
-        { status: 403 }
-      );
+    if (!res?.ok) {
+      const err = String(res?.error ?? "");
+      // نسخهٔ قدیمی اسکریپت این عملیات را نمی‌شناسد
+      if (err.includes("sheets_export")) {
+        return NextResponse.json(
+          { error: "old_script", message: "اسکریپت گوگل قدیمی است؛ کد جدید را از همین صفحه کپی کنید و با «New version» دوباره Deploy کنید" },
+          { status: 400 }
+        );
+      }
+      return NextResponse.json({ error: "script", message: err.slice(0, 300) || "اسکریپت گوگل پاسخ معتبری نداد" }, { status: 502 });
     }
-    return NextResponse.json({ error: msg.slice(0, 300) }, { status: 500 });
+    return NextResponse.json({ ok: true, habits: habits.length, url: res.url });
+  } catch (e: any) {
+    return NextResponse.json({ error: "script", message: String(e?.message ?? e).slice(0, 300) }, { status: 502 });
   }
 }

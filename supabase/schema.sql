@@ -99,8 +99,6 @@ alter table user_settings add column if not exists script_url text;
 alter table user_settings add column if not exists calendar_connected boolean default false;
 alter table user_settings add column if not exists google_email text;
 alter table user_settings add column if not exists last_sync_at timestamptz;
--- شیت خروجی یک‌طرفه (ADR-001)
-alter table user_settings add column if not exists export_spreadsheet_id text;
 
 -- ۸. جدول توکن‌های اتصال گوگل
 create table if not exists google_tokens (

@@ -4,7 +4,9 @@
  */
 
 export const GOOGLE_APPS_SCRIPT_SOURCE = `/**
- * اسکریپت اتصال تقویم گوگل (Google Calendar)
+ * اسکریپت اتصال تقویم گوگل (Google Calendar) و خروجی Google Sheets
+ * نسخهٔ ۲ — اگر نسخهٔ قبلی را نصب کرده‌اید، این کد را جایگزین کنید و
+ * Deploy > Manage deployments > Edit > Version: New version را بزنید (آدرس عوض نمی‌شود).
  * 
  * نحوه نصب:
  * ۱. وارد https://script.new شوید (یا script.google.com).
@@ -25,7 +27,38 @@ function doPost(e) {
     // ۱. تست اتصال
     if (action === "test") {
       var userEmail = Session.getActiveUser().getEmail() || "connected";
-      return jsonResponse({ ok: true, email: userEmail });
+      return jsonResponse({ ok: true, email: userEmail, version: 2, sheets: true });
+    }
+
+    // ۱-ب. خروجی یک‌طرفهٔ یک ماه به Google Sheets
+    // فایل یک‌بار ساخته می‌شود و شناسه‌اش در Script Properties همین اسکریپت می‌ماند
+    if (action === "sheets_export") {
+      var values = body.values || [];
+      var tab = String(body.tab || "Habits");
+      var props = PropertiesService.getScriptProperties();
+      var id = props.getProperty("EXPORT_SPREADSHEET_ID");
+      var ss = null;
+      if (id) {
+        try { ss = SpreadsheetApp.openById(id); } catch (e) { ss = null; }
+      }
+      var sh = null;
+      if (!ss) {
+        ss = SpreadsheetApp.create(body.title || "Yeho Habits");
+        props.setProperty("EXPORT_SPREADSHEET_ID", ss.getId());
+        sh = ss.getSheets()[0];
+        sh.setName(tab);
+      } else {
+        sh = ss.getSheetByName(tab) || ss.insertSheet(tab);
+      }
+      sh.clear();
+      sh.setRightToLeft(true);
+      if (values.length && values[0].length) {
+        sh.getRange(1, 1, values.length, values[0].length).setValues(values);
+        sh.getRange(1, 1, 1, values[0].length).setFontWeight("bold");
+        sh.setFrozenRows(1);
+        sh.setFrozenColumns(1);
+      }
+      return jsonResponse({ ok: true, url: ss.getUrl() + "#gid=" + sh.getSheetId() });
     }
 
     // ۲. ایجاد یا ویرایش یادآور یا جلسه در تقویم
